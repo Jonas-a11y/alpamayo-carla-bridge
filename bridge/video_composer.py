@@ -74,15 +74,28 @@ class VideoComposer:
         # Try to load a nice font; fall back to default.
         self._font: Optional[ImageFont.FreeTypeFont] = None
         self._font_small: Optional[ImageFont.FreeTypeFont] = None
-        try:
-            self._font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 20)
-            self._font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
-        except (OSError, IOError):
+        _font_candidates = [
+            # Windows
+            "C:/Windows/Fonts/segoeui.ttf",
+            "C:/Windows/Fonts/segoeuib.ttf",
+            "C:/Windows/Fonts/arial.ttf",
+            "C:/Windows/Fonts/arialbd.ttf",
+            # Linux
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            # macOS
+            "/System/Library/Fonts/Helvetica.ttc",
+        ]
+        for font_path in _font_candidates:
             try:
-                self._font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 20)
-                self._font_small = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 16)
+                self._font = ImageFont.truetype(font_path, 20)
+                self._font_small = ImageFont.truetype(font_path, 16)
+                logger.debug("Using font: %s", font_path)
+                break
             except (OSError, IOError):
-                logger.debug("No TrueType font found — using default bitmap font.")
+                continue
+        if self._font is None:
+            logger.debug("No TrueType font found — using default bitmap font.")
 
     # ------------------------------------------------------------------
     # Public API
@@ -440,11 +453,13 @@ class VideoComposer:
         Args:
             frames_dir: Directory containing ``frame_XXXXX.png`` files.
         """
+        # Use Path / operator for cross-platform path separators.
+        input_pattern = str(Path(frames_dir) / "frame_%05d.png")
         cmd = [
             "ffmpeg",
             "-y",
             "-framerate", str(self._fps),
-            "-i", f"{frames_dir}/frame_%05d.png",
+            "-i", input_pattern,
             "-c:v", "libx264",
             "-pix_fmt", "yuv420p",
             "-preset", "medium",
@@ -452,7 +467,12 @@ class VideoComposer:
             str(self._output_path),
         ]
         logger.info("Running ffmpeg: %s", " ".join(cmd))
-        result = subprocess.run(cmd, capture_output=True, text=True)  # noqa: S603
+        # On Windows, suppress the ffmpeg console window.
+        kwargs: Dict[str, Any] = {"capture_output": True, "text": True}
+        import platform
+        if platform.system() == "Windows":
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+        result = subprocess.run(cmd, **kwargs)  # noqa: S603
         if result.returncode != 0:
             logger.error("ffmpeg stderr: %s", result.stderr)
             raise RuntimeError(f"ffmpeg failed (rc={result.returncode}): {result.stderr[:500]}")

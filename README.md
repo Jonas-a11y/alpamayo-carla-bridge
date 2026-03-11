@@ -33,28 +33,69 @@ Connect [NVIDIA Alpamayo-R1](https://huggingface.co/nvidia/Alpamayo-R1-10B) — 
 
 ## Installation
 
-```bash
+### Windows (primary target)
+
+```powershell
 # 1. Clone
-git clone https://github.com/<you>/alpamayo-carla-bridge.git
+git clone https://github.com/Jonas-a11y/alpamayo-carla-bridge.git
 cd alpamayo-carla-bridge
 
-# 2. Create a venv (recommended)
+# 2. Create a venv
+python -m venv .venv
+.venv\Scripts\activate
+
+# 3. Install the CARLA Python API
+#    (copy the .whl from your CARLA installation, e.g. PythonAPI\carla\dist\)
+pip install path\to\carla-0.9.15-cpXX-cpXX-win_amd64.whl
+
+# 4. Install remaining deps
+pip install -r requirements.txt
+
+# 5. Install ffmpeg (if not installed)
+#    Option A: winget install ffmpeg
+#    Option B: download from https://ffmpeg.org/download.html and add to PATH
+
+# 6. Log in to HuggingFace (needed for gated model download)
+huggingface-cli login
+```
+
+### Linux / macOS
+
+```bash
+# 1. Clone
+git clone https://github.com/Jonas-a11y/alpamayo-carla-bridge.git
+cd alpamayo-carla-bridge
+
+# 2. Create a venv
 python -m venv .venv && source .venv/bin/activate
 
 # 3. Install the CARLA Python API
-#    (copy the .egg or .whl from your CARLA installation)
 pip install /path/to/carla-0.9.15-cpXX-cpXX-linux_x86_64.whl
 
 # 4. Install remaining deps
 pip install -r requirements.txt
 
-# 5. Log in to HuggingFace (needed for gated model download)
+# 5. Log in to HuggingFace
 huggingface-cli login
 ```
 
 ---
 
 ## Quick Start
+
+### Windows
+
+```powershell
+# Terminal 1 — start CARLA server
+CarlaUE4.exe -quality-level=Low
+
+# Terminal 2 — run the bridge
+python scripts\run_drive.py                       # uses config.yaml defaults
+python scripts\run_drive.py --config my.yaml      # custom config
+python scripts\run_drive.py --max-steps 120       # override step limit
+```
+
+### Linux / macOS
 
 ```bash
 # Terminal 1 — start CARLA server
