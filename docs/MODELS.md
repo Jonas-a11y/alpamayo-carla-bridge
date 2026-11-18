@@ -123,17 +123,20 @@ handles per-camera pixel budgets, relative-time labels and uint8 normalization;
 In the Edge environment:
 
 ~~~bash
-pip install -e '.[edge,test]'
+pip install -e '.[edge,test,video]'
+ffmpeg -version
 python -m pytest -q -m 'not nano_super'
 ~~~
 
 In the Nano/Super environment, after installing the three source packages:
 
 ~~~bash
-pip install -e '.[nano-super,test]'
+pip install -e '.[nano-super,test,video]'
+ffmpeg -version
 python -m pytest -q -m 'not edge'
 ~~~
 
 These commands do not load checkpoints. Runtime-specific tests use the actual
 upstream helpers and model-class imports with mocked predictions/processors;
-shared tests exercise capture, lifecycle, coordinates and selection behavior.
+shared tests exercise capture, lifecycle, coordinates, selection behavior and the
+Colab subprocess/video path. Install ffmpeg (including ffprobe) for video checks.

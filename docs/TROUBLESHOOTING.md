@@ -24,6 +24,9 @@ before starting a new session.
 | Unexpected/non-finite trajectory | The native action expert returned an invalid output. Confirm upstream source/checkpoint compatibility and dtype/device settings; the bridge stops instead of substituting a path. |
 | Collision detected | The session stops. Inspect the recording, spawn location and calibration before retrying. Restart resets collision state and captures fresh history. |
 | `PIL`/`matplotlib` missing or ffmpeg not found | Install `.[video]` and ffmpeg. `--no-video` skips composition; recording still needs Pillow. Set `recording.enabled: false` for a drive without recording. |
+| Colab: invalid `module://matplotlib_inline.backend_inline` backend | Download the current notebook and rerun its setup cell. The isolated workers set `MPLBACKEND=Agg` before imports. |
+| Colab CARLA cannot start / no NVIDIA Vulkan device | Inspect `carla-server.json`, `carla-server.log`, `vulkan.log` and the first error in `carla-drive.log`. For `vkCreateInstance` failure with `libGLX_nvidia`, use the current notebook: it selects the headless EGL ICD and extracts matching graphics libraries when absent. Some runtimes still lack usable Vulkan. CUDA availability alone does not establish RGB rendering. |
+| No CARLA video in the Colab report | Check `carla-drive` and `video-render` in `summary.json`. Only a successful recorded drive produces `carla-drive.mp4`; a failed drive has no footage. Enable `RUN_CARLA_DRIVE` and `RENDER_VIDEO`; 30 steps yield about three seconds at 10 Hz. The notebook does not substitute a static dataset image for driving footage. |
 
 For an unresolved problem, include the selected variant, upstream source and
 checkpoint revisions, Python/PyTorch/Transformers/CARLA versions, GPU and the

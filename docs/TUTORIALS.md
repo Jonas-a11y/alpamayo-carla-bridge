@@ -173,7 +173,11 @@ python scripts/compose_video.py recordings/YOUR_SESSION --config my-config.yaml
 
 Replace `YOUR_SESSION` with the created directory name. The output is
 `recordings/YOUR_SESSION/output.mp4`, showing the four front views, reasoning
-and predicted/actual paths. Edge and Super recordings also retain rear-camera
+and predicted/actual paths. Front-wide and tele views also show the predicted
+path projected into the camera image. Projection uses the camera calibration
+and ego origin saved in the session metadata; XY output is placed on the current
+ego plane, so road slopes and calibration errors affect the overlay.
+Edge and Super recordings also retain rear-camera
 JPEGs. Omitting `--no-video` composes the video automatically after a successful
 CLI run. In Python, the session path is available as `bridge.session_dir`.
 
@@ -203,6 +207,38 @@ L4/A100 are useful targets for Edge; Nano needs at least 24 GB VRAM. T4 lacks
 native BF16, and Super usually exceeds Colab GPU memory. Unsupported GPU/memory
 conditions explicitly skip inference, while all adapter tests still run. The
 notebook reports failures and skips separately and records the tested Bridge
-commit. It starts no CARLA server; an optional short driving test needs your own
-CARLA 0.9.16 server reachable from Colab. A dataset prediction alone does not
-validate closed-loop driving.
+commit. A dataset prediction alone does not validate closed-loop driving.
+
+To try the complete drive in Colab, set `RUN_CARLA_DRIVE=True` and leave
+`START_CARLA_IN_COLAB=True`. The notebook downloads the official CARLA 0.9.16
+Linux archive (about 8.35 GB; reserve at least 35 GB for installation), starts
+it as a separate user in off-screen Vulkan mode and connects to `127.0.0.1`.
+It checks the server version, a real RGB camera frame and the remaining VRAM
+before loading the model for the drive. After a successful dataset prediction,
+the memory preflight uses its measured peak plus 2 GB reserve; otherwise it uses
+the model guidelines. CARLA's GPU use can make L4 memory tight; A100 offers more
+room. If Colab exposes CUDA without graphics libraries,
+the worker extracts the matching official NVIDIA archive for user-space
+graphics libraries only. It does not run the driver installer. A Colab runtime
+without usable NVIDIA Vulkan is reported as a failure with diagnostic logs.
+The supplied L4 run confirmed real Edge inference, but CARLA failed at its GLX
+Vulkan ICD. The corrected worker uses NVIDIA's documented EGL ICD for environments
+without X11. This startup correction still needs a real Colab rerun.
+
+The worker stops its own server process group on completion or error. Archives
+and extracted files are outside the report; repeated runs reuse the installation.
+For an external CARLA 0.9.16 server, disable `START_CARLA_IN_COLAB` and fill in
+`CARLA_HOST` with an address reachable from Colab.
+
+The notebook enables the drive and `RENDER_VIDEO=True` by default. After a
+successful CARLA drive, it composes the recorded camera sequence with the path
+overlay, telemetry and reasoning. The default `MAX_STEPS=30` yields about three
+seconds of simulation footage at 10 frames/s. Inference may take several minutes
+of wall time for those decisions; rendering adds no driving steps.
+
+The video appears in the notebook and is exported as `carla-drive.mp4` alongside
+`video.json` in the ZIP. If CARLA fails or is disabled, rendering is explicitly
+skipped. A dataset snapshot is not substituted for a driving video. Prediction
+JSON, PNG and the sample snapshot remain available for dataset inference.
+Isolated workers use Matplotlib's `Agg` backend so Colab's kernel-specific inline
+backend does not prevent imports.

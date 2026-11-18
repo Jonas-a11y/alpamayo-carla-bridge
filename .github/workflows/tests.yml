@@ -12,7 +12,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install '.[${{ matrix.runtime }},test]'
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - run: pip install '.[${{ matrix.runtime }},test,video]'
       - if: matrix.runtime == 'nano-super'
         run: >-
           pip install --no-deps
