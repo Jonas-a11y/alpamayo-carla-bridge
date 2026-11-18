@@ -20,6 +20,7 @@ training and advanced multi-GPU navigation CFG are outside this driving API.
 ## Start here
 
 - [Tutorials: laptop setup, first CARLA run and Python usage](docs/TUTORIALS.md)
+- [CARLA-only Colab notebook: test server startup, RGB rendering and a three-second drive first](notebooks/carla_colab.ipynb)
 - [Colab notebook: check all adapters, try GPU inference and optionally render video](notebooks/alpamayo_colab.ipynb)
 - [Model selection, installations and input profiles](docs/MODELS.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
@@ -106,8 +107,10 @@ Edge checkpoint inference passed on one official NVIDIA clip in Colab with an
 L4 and BF16: 64 finite XY waypoints, 5.03 s inference and 6.18 GB peak allocated
 GPU memory for one candidate. R1/1.5/Super checkpoint runs and closed-loop CARLA
 driving remain unverified. A follow-up Colab run confirmed headless EGL/Vulkan
-on the L4, but CARLA did not reach RPC readiness. The notebook now starts the
-configured map directly and exports startup diagnostics; this needs a rerun.
+on the L4, but CARLA still did not reach RPC readiness after starting the
+configured map directly. Use the CARLA-only notebook to separate engine/RPC
+startup from GPU camera rendering before downloading model weights. Its real
+Colab server/camera tests remain unverified.
 CPU checks and a single dataset clip do not establish driving quality or
 real-time performance. CARLA imagery differs from the training data.
 The camera rig and approximate rear-axle origin require target-vehicle calibration.
