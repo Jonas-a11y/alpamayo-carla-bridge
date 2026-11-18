@@ -184,3 +184,25 @@ in their respective environments. They check the upstream input/prompt adapters
 and simulated CARLA lifecycle without downloading checkpoints. A passing suite
 does not validate driving quality. Evaluate camera calibration, inference
 memory/latency and closed-loop behavior on the target CUDA/CARLA host.
+
+## 6. Validate on Google Colab
+
+Download [alpamayo_colab.ipynb](../notebooks/alpamayo_colab.ipynb), upload it to
+[Google Colab](https://colab.research.google.com/), choose a GPU runtime, and run
+the cells in order. The notebook installs managed Python 3.12 environments for
+Edge and Nano/Super, runs both CPU contract suites and verifies a built core wheel.
+It does not change the Colab kernel's model dependencies or require a restart.
+
+By default it then attempts real Edge inference on an official NVIDIA clip.
+Select another variant at the top to test its weights. Supply Hugging Face access
+to the chosen model and the PhysicalAI-AV dataset through a Colab `HF_TOKEN`
+secret or the masked prompt. Tokens are passed in memory, and the downloadable
+report contains logs/results rather than credentials or model caches.
+
+L4/A100 are useful targets for Edge; Nano needs at least 24 GB VRAM. T4 lacks
+native BF16, and Super usually exceeds Colab GPU memory. Unsupported GPU/memory
+conditions explicitly skip inference, while all adapter tests still run. The
+notebook reports failures and skips separately and records the tested Bridge
+commit. It starts no CARLA server; an optional short driving test needs your own
+CARLA 0.9.16 server reachable from Colab. A dataset prediction alone does not
+validate closed-loop driving.

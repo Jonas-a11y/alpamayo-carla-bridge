@@ -20,6 +20,7 @@ training and advanced multi-GPU navigation CFG are outside this driving API.
 ## Start here
 
 - [Tutorials: laptop setup, first CARLA run and Python usage](docs/TUTORIALS.md)
+- [Colab notebook: install, check all adapters and try real GPU inference](notebooks/alpamayo_colab.ipynb)
 - [Model selection, installations and input profiles](docs/MODELS.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Camera placement and rear-axle calibration](docs/CAMERA_CONFIG.md)
