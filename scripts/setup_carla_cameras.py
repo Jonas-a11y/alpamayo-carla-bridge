@@ -16,7 +16,6 @@ import sys
 import time
 from pathlib import Path
 
-import numpy as np
 from PIL import Image
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -63,12 +62,13 @@ def main() -> None:
 
         # Let the sensors warm up.
         for _ in range(5):
-            carla_client.tick()
+            frame_id = carla_client.tick()
             time.sleep(0.1)
 
         # Collect one set of frames.
-        frames = camera_mgr.collect_frames()
-        for cam_name, frame_array in frames.items():
+        frames = camera_mgr.collect_frames(frame_id)
+        for cam_name, frame in frames.items():
+            frame_array = frame.rgb
             out_path = output_dir / f"{cam_name}.jpg"
             img = Image.fromarray(frame_array)
             img.save(out_path, "JPEG", quality=95)

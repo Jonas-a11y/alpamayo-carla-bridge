@@ -1,216 +1,116 @@
-# Alpamayo–CARLA Bridge 🚗🧠
+# Alpamayo–CARLA Bridge
 
-Connect [NVIDIA Alpamayo-R1](https://huggingface.co/nvidia/Alpamayo-R1-10B) — a Vision-Language-Action (VLA) model for autonomous driving — to the [CARLA](https://carla.org/) open-source simulator. Drive a virtual Tesla Model 3 using Alpamayo's predicted trajectories, record every frame, and produce a composite analysis video.
+Connect NVIDIA's Alpamayo driving models to CARLA through an importable Python
+package. A model decision returns 64 ego-frame waypoints covering +0.1 through
++6.4 seconds, its reasoning, and the resulting throttle/steering/brake command.
+The CLI and Python API use the same synchronous driving implementation.
 
-> **CPU-only by default.** This project is designed to run inference on CPU with PyTorch SDPA attention so you don't need a beefy GPU.
+| Model | Select with | Checkpoint |
+| --- | --- | --- |
+| Alpamayo 1 Nano (formerly R1) | `r1` | `nvidia/Alpamayo-R1-10B` |
+| Alpamayo 1.5 Nano | `r15` | `nvidia/Alpamayo-1.5-10B` |
+| Alpamayo 2 Edge — default | `edge` | `nvidia/Alpamayo2-Edge` |
+| Alpamayo 2 Super | `super` | `nvidia/Alpamayo2-Super` |
 
----
+This project runs their native **trajectory/action-expert APIs**. It does not
+parse coordinates from ordinary text generation or replace failed predictions
+with an invented driving path. Additional upstream tasks such as VQA, labeling,
+training and advanced multi-GPU navigation CFG are outside this driving API.
 
-## Features
+## Start here
 
-| Feature | Description |
-|---------|-------------|
-| **4-camera rig** | front-wide (120°), front-left (70°), front-right (70°), front-tele (30°) |
-| **Alpamayo inference** | 64-waypoint trajectory (6.4 s horizon) + natural-language reasoning trace |
-| **PID controller** | Lateral + longitudinal PID converts waypoints → throttle / steer / brake |
-| **Per-step recording** | JPEG frames, JSONL telemetry, metadata snapshot |
-| **Composite video** | Multi-view + BEV trajectory map + reasoning overlay + status bar |
-| **Crash detection** | Collision sensor stops the loop immediately |
-| **Synchronous mode** | CARLA waits for inference — deterministic, no frame drops |
+- [Tutorials: laptop setup, first CARLA run and Python usage](docs/TUTORIALS.md)
+- [Colab notebook: install, check all adapters and try real GPU inference](notebooks/alpamayo_colab.ipynb)
+- [Model selection, installations and input profiles](docs/MODELS.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Camera placement and rear-axle calibration](docs/CAMERA_CONFIG.md)
+- [Architecture and lifecycle](docs/ARCHITECTURE.md)
 
----
+### Install the importable core
 
-## Prerequisites
+From a checkout, on macOS, Linux or Windows:
 
-| Requirement | Version |
-|-------------|---------|
-| CARLA simulator | **0.9.15+** (server must be running before you launch the bridge) |
-| Python | **3.10 – 3.12** |
-| ffmpeg | Any recent version (`brew install ffmpeg` / `apt install ffmpeg`) |
-| HuggingFace account | Access to the **gated** model `nvidia/Alpamayo-R1-10B` — request access on the model page, then `huggingface-cli login` |
-
----
-
-## Installation
-
-### Windows (primary target)
-
-```powershell
-# 1. Clone
-git clone https://github.com/Jonas-a11y/alpamayo-carla-bridge.git
-cd alpamayo-carla-bridge
-
-# 2. Create a venv
+~~~bash
 python -m venv .venv
-.venv\Scripts\activate
+source .venv/bin/activate
+pip install -e .
+alpamayo-carla-drive --help
+~~~
 
-# 3. Install the CARLA Python API
-#    (copy the .whl from your CARLA installation, e.g. PythonAPI\carla\dist\)
-pip install path\to\carla-0.9.15-cpXX-cpXX-win_amd64.whl
+On Windows, activate with `.venv/Scripts/Activate.ps1` in PowerShell. The
+installed distribution is `alpamayo-carla-bridge` and the Python import is
+`bridge`. The core needs only NumPy and PyYAML; importing it does not load
+PyTorch, Transformers, CARLA, model weights or a network connection.
 
-# 4. Install remaining deps
-pip install -r requirements.txt
+### First Edge drive on the target host
 
-# 5. Install ffmpeg (if not installed)
-#    Option A: winget install ffmpeg
-#    Option B: download from https://ffmpeg.org/download.html and add to PATH
+Use **Python 3.12**, an NVIDIA CUDA GPU with BF16 support, matching CARLA
+0.9.16 server/client versions, and Hugging Face access to the checkpoint:
 
-# 6. Log in to HuggingFace (needed for gated model download)
-huggingface-cli login
-```
+~~~bash
+pip install -e '.[edge,carla,video]'
+hf auth login
+# Start CARLA 0.9.16 in another terminal before this command.
+alpamayo-carla-drive --config config.yaml --model edge --max-steps 10 --no-video
+~~~
 
-### Linux / macOS
+Edge's BF16 reference setup recommends at least 16 GB VRAM. Nano needs at
+least 24 GB; Super is a 34B model and requires substantially more memory. See
+[model setup](docs/MODELS.md) before changing variants. The CARLA extra has
+Python 3.12 wheels for Linux x86_64 and Windows, not macOS. Optional video
+composition requires ffmpeg on PATH.
 
-```bash
-# 1. Clone
-git clone https://github.com/Jonas-a11y/alpamayo-carla-bridge.git
-cd alpamayo-carla-bridge
+### Use it from Python
 
-# 2. Create a venv
-python -m venv .venv && source .venv/bin/activate
+~~~python
+from bridge import CarlaBridge, load_config
 
-# 3. Install the CARLA Python API
-pip install /path/to/carla-0.9.15-cpXX-cpXX-linux_x86_64.whl
+config = load_config("config.yaml", model="edge")
+config["recording"]["enabled"] = False
 
-# 4. Install remaining deps
-pip install -r requirements.txt
+with CarlaBridge(config) as bridge:
+    for _ in range(10):
+        result = bridge.step(nav_text="Follow the current lane.")
+        print(result.state.timestamp_us, result.output.trajectory[0])
+        print(result.output.reasoning)
+~~~
 
-# 5. Log in to HuggingFace
-huggingface-cli login
-```
+For Alpamayo 1.5 use `model="r15"` in its installed Nano/Super environment.
+For R1 or Super, call `bridge.step()` without navigation text. Selecting a
+*different* model through `load_config(..., model=...)` or `--model` resets the
+previous checkpoint ID/revision and removes navigation for variants that do
+not use it. Selecting the existing variant preserves its pinned/custom checkpoint.
 
----
+The context manager loads the model, spawns the rig, captures real history while
+braking, and restores actors/world settings on exit. Restarting the same bridge
+captures a new history and reuses its loaded model. Inference, capture and
+collision failures raise; a failed step commands braking. CLI failures exit
+nonzero.
 
-## Quick Start
+## Verification and current limits
 
-### Windows
+~~~bash
+pip install -e '.[edge,test]'
+python -m pytest -q -m 'not nano_super'
+~~~
 
-```powershell
-# Terminal 1 — start CARLA server
-CarlaUE4.exe -quality-level=Low
+CI checks both the Edge and Nano/Super runtimes. Tests exercise actual upstream
+sample/prompt helpers and model-class imports, mocked action-expert predictions,
+image schedules, pose conversion, frame synchronization, model selection,
+restart behavior and cleanup failures. See the model guide to run the Nano/Super
+checks locally. Tests and core installation do not require model weights.
 
-# Terminal 2 — run the bridge
-python scripts\run_drive.py                       # uses config.yaml defaults
-python scripts\run_drive.py --config my.yaml      # custom config
-python scripts\run_drive.py --max-steps 120       # override step limit
-```
+Full CUDA model inference and closed-loop CARLA driving have **not** been run on
+this Mac. Passing CPU checks establishes API/data-contract behavior, not driving
+quality or real-time performance. CARLA imagery differs from the training data.
+The camera rig and approximate rear-axle origin require target-vehicle calibration.
 
-### Linux / macOS
+## Sources
 
-```bash
-# Terminal 1 — start CARLA server
-./CarlaUE4.sh -quality-level=Low -RenderOffScreen
+- [Alpamayo 1 Nano](https://github.com/NVlabs/alpamayo)
+- [Alpamayo 1.5 Nano](https://github.com/NVlabs/alpamayo1.5)
+- [Alpamayo 2 Edge](https://github.com/NVlabs/alpamayo2-edge)
+- [Alpamayo 2 Super](https://github.com/NVlabs/alpamayo2)
+- [CARLA documentation](https://carla.readthedocs.io/)
 
-# Terminal 2 — run the bridge
-python scripts/run_drive.py                       # uses config.yaml defaults
-python scripts/run_drive.py --config my.yaml      # custom config
-python scripts/run_drive.py --max-steps 120       # override step limit
-```
-
-The driving loop will:
-
-1. Connect to CARLA and load the configured map (default: `Town03`).
-2. Spawn the ego vehicle at a random point.
-3. Attach four cameras + a collision sensor.
-4. Load Alpamayo on CPU.
-5. Run up to **60 steps** (configurable) or until a collision.
-6. Save recordings to `recordings/<session_id>/`.
-7. Auto-compose a composite video → `recordings/<session_id>/output.mp4`.
-
-### Compose video from an existing recording
-
-```bash
-python scripts/compose_video.py recordings/<session_id>
-```
-
----
-
-## Configuration
-
-All settings live in **`config.yaml`**. Key sections:
-
-| Section | What it controls |
-|---------|-----------------|
-| `carla` | Server host/port, map name, sync mode, tick delta |
-| `vehicle` | Blueprint ID |
-| `cameras` | Resolution, per-camera FOV / position / orientation |
-| `alpamayo` | Model ID, device (`cpu` / `cuda`), attention impl |
-| `controller` | PID gains, target speed, actuator limits |
-| `run` | `max_steps` — hard cap on driving loop iterations |
-| `recording` | Enable/disable, FPS, output video resolution |
-
-> **Switching to GPU:** set `alpamayo.device: "cuda"` and optionally change `attn_implementation` to `"flash_attention_2"` if your card supports it.
-
----
-
-## Video Output
-
-The composite video layout:
-
-```
-┌─────────────────────────────────────────────┐
-│              front_tele (Zoom)               │
-├────────────┬─────────────┬──────────────────┤
-│ front_left │ front_wide  │   front_right    │
-├────────────┴─────────────┴──────────────────┤
-│  BEV Trajectory Map     │  Reasoning Trace  │
-│  blue = predicted       │  (typewriter fx)  │
-│  red  = actual path     │                   │
-│  green = ego position   │                   │
-├──────────────────────────┴──────────────────┤
-│  Status Bar: Speed | Step X/60 | Timer      │
-└─────────────────────────────────────────────┘
-```
-
----
-
-## Project Structure
-
-```
-alpamayo-carla-bridge/
-├── config.yaml                 # All tunables
-├── requirements.txt
-├── bridge/
-│   ├── __init__.py
-│   ├── carla_client.py         # CARLA connection & world setup
-│   ├── camera_manager.py       # Spawn & manage camera sensors
-│   ├── ego_motion.py           # Ego-state history tracker
-│   ├── alpamayo_inference.py   # Model loading & inference
-│   ├── trajectory_controller.py# PID controller
-│   ├── recorder.py             # Per-step frame & telemetry saver
-│   ├── video_composer.py       # Composite video renderer
-│   └── utils.py                # Shared helpers
-├── scripts/
-│   ├── run_drive.py            # Main entry point
-│   ├── compose_video.py        # Standalone video composer
-│   └── setup_carla_cameras.py  # Camera debug / preview utility
-├── docs/
-│   ├── ARCHITECTURE.md         # Pipeline & data-flow diagrams
-│   └── CAMERA_CONFIG.md        # Camera placement guide
-└── recordings/                 # Auto-created per session
-```
-
----
-
-## Known Limitations
-
-- **Domain gap** — Alpamayo was trained on real-world driving data; CARLA's rendered world looks different. Expect degraded trajectory quality.
-- **CPU speed** — Inference on CPU is *slow* (seconds per step). Synchronous mode ensures correctness but makes real-time driving impossible.
-- **No traffic** — The default config does not spawn NPC vehicles or pedestrians. Add them via CARLA's Traffic Manager if desired.
-- **Model gating** — `nvidia/Alpamayo-R1-10B` is a gated model. You must request and be granted access on HuggingFace before downloading.
-- **CARLA API compatibility** — Tested with CARLA 0.9.15. Older versions may have breaking API changes.
-
----
-
-## References
-
-- **Alpamayo model:** <https://huggingface.co/nvidia/Alpamayo-R1-10B>
-- **Alpamayo code / paper:** <https://github.com/NVlabs/alpamayo>
-- **CARLA simulator:** <https://carla.org/>
-- **CARLA Python API docs:** <https://carla.readthedocs.io/>
-
----
-
-## License
-
-MIT — see individual dependencies for their licenses.
+MIT project; model weights and dependencies have their own licenses.

@@ -97,6 +97,8 @@ class TrajectoryController:
         self._longitudinal_pid = PIDState(kp=lon_gains[0], ki=lon_gains[1], kd=lon_gains[2])
 
         self._target_speed_kmh: float = ctrl.get("target_speed_kmh", 30.0)
+        if self._target_speed_kmh <= 0:
+            raise ValueError("controller.target_speed_kmh must be positive")
         self._max_throttle: float = ctrl.get("max_throttle", 0.6)
         self._max_brake: float = ctrl.get("max_brake", 0.8)
         self._max_steer: float = ctrl.get("max_steer", 0.7)
@@ -110,7 +112,6 @@ class TrajectoryController:
         self,
         trajectory: List[List[float]],
         current_speed_kmh: float,
-        ego_yaw_deg: float,
     ) -> VehicleCommand:
         """Compute throttle, steer, and brake from the predicted trajectory.
 
@@ -121,14 +122,13 @@ class TrajectoryController:
             trajectory: List of ``[x, y]`` waypoints in ego frame
                         (x = forward, y = left).
             current_speed_kmh: Current ego speed in km/h.
-            ego_yaw_deg: Current ego yaw in degrees (unused for ego-frame traj).
 
         Returns:
             A :class:`VehicleCommand`.
         """
         if not trajectory:
-            logger.warning("Empty trajectory — applying gentle brake.")
-            return VehicleCommand(throttle=0.0, steer=0.0, brake=0.3)
+            self.reset()
+            return VehicleCommand(brake=self._max_brake)
 
         # ------ Lateral control (steering) ------
         # Pick a look-ahead waypoint (~0.5 s ahead at 10 Hz = index 5).
@@ -184,7 +184,7 @@ class TrajectoryController:
     # ------------------------------------------------------------------
 
     def _target_speed_from_trajectory(self, trajectory: List[List[float]]) -> float:
-        """Estimate desired speed from the trajectory's average step distance.
+        """Estimate desired speed over the first predicted second, including t0.
 
         Args:
             trajectory: Waypoints in ego frame.
@@ -192,19 +192,16 @@ class TrajectoryController:
         Returns:
             Target speed in km/h, clamped to the configured maximum.
         """
-        if len(trajectory) < 2:
-            return self._target_speed_kmh
-
-        # Average distance between consecutive waypoints.
         total_dist = 0.0
-        for i in range(1, min(len(trajectory), 20)):
-            dx = trajectory[i][0] - trajectory[i - 1][0]
-            dy = trajectory[i][1] - trajectory[i - 1][1]
+        previous = [0.0, 0.0]
+        for point in trajectory[:10]:
+            dx = point[0] - previous[0]
+            dy = point[1] - previous[1]
             total_dist += math.sqrt(dx * dx + dy * dy)
+            previous = point
 
-        avg_step = total_dist / min(len(trajectory) - 1, 19)
-        # At 10 Hz, distance per step = speed(m/s) * 0.1
-        implied_speed_ms = avg_step / self._dt
+        # Published Alpamayo variants predict at 10 Hz, independently of controller dt.
+        implied_speed_ms = total_dist / (min(len(trajectory), 10) * 0.1)
         implied_speed_kmh = implied_speed_ms * 3.6
 
         return min(implied_speed_kmh, self._target_speed_kmh)

@@ -11,11 +11,12 @@ from typing import Any, Dict
 import yaml
 
 
-def load_config(path: str | Path = "config.yaml") -> Dict[str, Any]:
+def load_config(path: str | Path = "config.yaml", *, model: str | None = None) -> Dict[str, Any]:
     """Load and return the YAML configuration file.
 
     Args:
         path: Path to the YAML config file.
+        model: Optional variant selection; switching clears the old checkpoint.
 
     Returns:
         Parsed configuration dictionary.
@@ -28,7 +29,20 @@ def load_config(path: str | Path = "config.yaml") -> Dict[str, Any]:
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
     with open(config_path, "r") as f:
-        return yaml.safe_load(f)
+        config = yaml.safe_load(f)
+    if model is not None:
+        from .alpamayo_inference import MODEL_IDS
+
+        if model not in MODEL_IDS:
+            raise ValueError(f"model must be one of {tuple(MODEL_IDS)}")
+        params = config.setdefault("alpamayo", {})
+        if params.get("variant", "edge") != model:
+            params["variant"] = model
+            params.pop("model_id", None)
+            params.pop("revision", None)
+            if model in ("r1", "super"):
+                params.pop("nav_text", None)
+    return config
 
 
 def setup_logging(level: int = logging.INFO) -> logging.Logger:
@@ -54,7 +68,7 @@ def carla_rotation_to_yaw_rad(rotation: Any) -> float:
         rotation: A ``carla.Rotation`` object.
 
     Returns:
-        Yaw angle in radians (counter-clockwise positive).
+        CARLA yaw in radians (clockwise positive in its left-handed world).
     """
     return math.radians(rotation.yaw)
 
@@ -96,7 +110,7 @@ def world_to_ego(
     cos_yaw = math.cos(ego_yaw_rad)
     sin_yaw = math.sin(ego_yaw_rad)
     local_x = dx * cos_yaw + dy * sin_yaw
-    local_y = -dx * sin_yaw + dy * cos_yaw
+    local_y = dx * sin_yaw - dy * cos_yaw
     return local_x, local_y
 
 
@@ -121,6 +135,6 @@ def ego_to_world(
     """
     cos_yaw = math.cos(ego_yaw_rad)
     sin_yaw = math.sin(ego_yaw_rad)
-    world_x = ego_x + local_x * cos_yaw - local_y * sin_yaw
-    world_y = ego_y + local_x * sin_yaw + local_y * cos_yaw
+    world_x = ego_x + local_x * cos_yaw + local_y * sin_yaw
+    world_y = ego_y + local_x * sin_yaw - local_y * cos_yaw
     return world_x, world_y
