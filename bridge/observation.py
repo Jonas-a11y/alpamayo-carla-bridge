@@ -15,11 +15,11 @@ EDGE_CAMERAS = {"front_left": 0, "front_wide": 1, "front_right": 2,
 
 
 def camera_ids(variant: str) -> dict[str, int]:
-    if variant == "edge":
+    if variant in ("edge", "super"):
         return EDGE_CAMERAS
-    if variant == "r1":
+    if variant in ("r1", "r15"):
         return R1_CAMERAS
-    raise ValueError("variant must be 'edge' or 'r1'")
+    raise ValueError("variant must be 'r1', 'r15', 'edge' or 'super'")
 
 
 @dataclass
@@ -61,13 +61,15 @@ class ObservationBuffer:
     def sample(self, nav_text: str = "") -> dict:
         if not self.ready:
             raise RuntimeError("The camera and ego histories are still warming up")
+        if self.variant in ("r1", "super") and nav_text:
+            raise ValueError(f"{self.variant} does not support navigation in this trajectory path")
         observations = list(self._observations)
         history_steps = 20 if self.variant == "edge" else 16
         xyz, rot = states_to_ego([state for _, state in observations[-history_steps:]])
         images, ids, timestamps = [], [], []
         for name, camera in self.cameras.items():
             offsets = ((-20, -10, -5, -1, 0) if camera in (1, 6) else (-10, -1, 0))
-            if self.variant == "r1":
+            if self.variant != "edge":
                 offsets = (-3, -2, -1, 0)
             group = [observations[-1 + offset][0][name] for offset in offsets]
             images.append(np.stack([frame.rgb.transpose(2, 0, 1) for frame in group]))
@@ -83,7 +85,11 @@ class ObservationBuffer:
                 "ego_history_xyz": xyz[None], "ego_history_rot": rot[None],
                 "nav_text": [nav_text],
             }
-        return {
+        sample = {
             "image_frames": np.ascontiguousarray(np.stack(images)),
+            "camera_indices": np.asarray(list(self.cameras.values()), dtype=np.int64),
             "ego_history_xyz": xyz[None, None], "ego_history_rot": rot[None, None],
         }
+        if self.variant == "r15":
+            sample["nav_text"] = nav_text
+        return sample

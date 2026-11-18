@@ -51,6 +51,7 @@ class CarlaClient:
         """
         import carla
 
+        self.crashed = False
         host = self._cfg_carla["host"]
         port = self._cfg_carla["port"]
         timeout = self._cfg_carla.get("timeout", 30)

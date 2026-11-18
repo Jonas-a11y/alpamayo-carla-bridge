@@ -48,8 +48,10 @@ def loaded_edge(monkeypatch, model=None):
     return inference, calls
 
 
+@pytest.mark.edge
 def test_edge_loader_native_sampling_and_candidate_selection(monkeypatch):
     inference, calls = loaded_edge(monkeypatch)
+    inference.load()
     result = inference.predict(fill_buffer().sample("Follow lane"))
     assert calls == [("nvidia/Alpamayo2-Edge", {"device": "cpu", "dtype": "float32",
                       "attn_implementation": "sdpa", "revision": "immutable"})]
@@ -58,6 +60,7 @@ def test_edge_loader_native_sampling_and_candidate_selection(monkeypatch):
     assert result.reasoning == "first"
 
 
+@pytest.mark.edge
 @pytest.mark.parametrize("failure", ["exception", "nan", "shape"])
 def test_inference_failures_do_not_invent_a_driving_trajectory(monkeypatch, failure):
     class BrokenModel(EdgeModel):

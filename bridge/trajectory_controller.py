@@ -200,7 +200,7 @@ class TrajectoryController:
             total_dist += math.sqrt(dx * dx + dy * dy)
             previous = point
 
-        # Both released models predict at 10 Hz, independently of controller dt.
+        # Published Alpamayo variants predict at 10 Hz, independently of controller dt.
         implied_speed_ms = total_dist / (min(len(trajectory), 10) * 0.1)
         implied_speed_kmh = implied_speed_ms * 3.6
 

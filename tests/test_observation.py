@@ -20,6 +20,7 @@ def fill_buffer(variant="edge"):
     return buffer
 
 
+@pytest.mark.edge
 def test_edge_profile_matches_real_upstream_validator_and_prompt():
     from alpamayo2_edge.sample import canonicalize_sample
     from alpamayo2_edge.helper import create_messages
@@ -59,6 +60,20 @@ def test_r1_profile_preserves_camera_and_time_order():
     np.testing.assert_array_equal(sample["image_frames"][:, :, 0, 0, 0],
                                   [[12, 13, 14, 15], [42, 43, 44, 45],
                                    [72, 73, 74, 75], [192, 193, 194, 195]])
+
+
+@pytest.mark.parametrize("variant,count", [("r15", 4), ("super", 6)])
+def test_new_model_profiles(variant, count):
+    buffer = fill_buffer(variant)
+    sample = buffer.sample("Turn right in 30m" if variant == "r15" else "")
+    assert sample["image_frames"].shape == (count, 4, 3, 4, 6)
+    assert sample["camera_indices"].tolist() == ([0, 1, 2, 6] if count == 4 else [0, 1, 2, 3, 5, 6])
+    assert sample["ego_history_xyz"].shape == (1, 1, 16, 3)
+    if variant == "r15":
+        assert sample["nav_text"] == "Turn right in 30m"
+    else:
+        with pytest.raises(ValueError, match="does not support navigation"):
+            buffer.sample("Turn right")
 
 
 def test_history_warmup_and_invalid_capture_are_explicit_errors():

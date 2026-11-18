@@ -3,12 +3,24 @@ on: [push, pull_request]
 jobs:
   cpu:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        runtime: [edge, nano-super]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install '.[edge,test]'
-      - run: python -m pytest -q
+      - run: pip install '.[${{ matrix.runtime }},test]'
+      - if: matrix.runtime == 'nano-super'
+        run: >-
+          pip install --no-deps
+          'alpamayo_r1 @ git+https://github.com/NVlabs/alpamayo.git@11a0e01c13a5622377c45ee37d653351453ec43b'
+          'alpamayo1_5 @ git+https://github.com/NVlabs/alpamayo1.5.git@36aeb4c5938cbc2eb2aed33b22434773da4ab639'
+          'alpamayo2_super @ git+https://github.com/NVlabs/alpamayo2.git@59776920bbd981f2c989213bba5ee8594e71ed1d'
+      - if: matrix.runtime == 'edge'
+        run: python -m pytest -q -m 'not nano_super'
+      - if: matrix.runtime == 'nano-super'
+        run: python -m pytest -q -m 'not edge'
       - run: alpamayo-carla-drive --help

@@ -185,3 +185,26 @@ def test_recording_finalization_error_still_restores_world_and_destroys_actors(s
     assert all(not actor.is_alive for actor in world.actors)
     assert world.settings.synchronous_mode is False
     assert world.settings.fixed_delta_seconds is None
+
+
+def test_restart_after_collision_uses_a_fresh_session_without_stale_recording(simulation, monkeypatch, tmp_path):
+    config, world = simulation
+    config["recording"]["enabled"] = True
+    bridge = CarlaBridge(config, tmp_path)
+    monkeypatch.setattr(bridge.inference, "load", lambda: None)
+    monkeypatch.setattr(bridge.inference, "predict", lambda sample: AlpamayoOutput(
+        [[i/10, 0] for i in range(1, 65)], "reasoning"))
+    with bridge:
+        first = bridge.step()
+        assert bridge.session_dir is not None
+        bridge.client.crashed = True
+        with pytest.raises(RuntimeError, match="Collision"):
+            bridge.step()
+    config["recording"]["enabled"] = False
+    with bridge:
+        second = bridge.step()
+        assert second.state.timestamp_us > first.state.timestamp_us
+        assert bridge.session_dir is None
+        assert bridge.client.crashed is False
+    assert all(not actor.is_alive for actor in world.actors)
+    assert world.settings.synchronous_mode is False

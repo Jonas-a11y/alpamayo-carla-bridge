@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from .alpamayo_inference import AlpamayoInference, AlpamayoOutput
+from .alpamayo_inference import MODEL_IDS, AlpamayoInference, AlpamayoOutput
 from .camera_manager import CameraManager
 from .carla_client import CarlaClient
 from .ego_motion import EgoMotionTracker, EgoState
@@ -46,6 +46,8 @@ class CarlaBridge:
         self._nav_text = config.get("alpamayo", {}).get("nav_text", "")
         if self.inference.variant == "edge" and (not isinstance(self._nav_text, str) or not self._nav_text.strip()):
             raise ValueError("Set alpamayo.nav_text to the intended navigation instruction")
+        if self.inference.variant in ("r1", "super") and self._nav_text:
+            raise ValueError("Remove alpamayo.nav_text for r1/super; this path does not use navigation")
         self.client = CarlaClient(config)
         self.controller = TrajectoryController(config)
         self._tracker = EgoMotionTracker(origin_x=config.get("vehicle", {}).get("rear_axle_x", 0.0))
@@ -64,6 +66,7 @@ class CarlaBridge:
             self.observations = ObservationBuffer(self.inference.variant)
             self.controller.reset()
             self._step = 0
+            self._recorder = None
             self.inference.load()
             world = self.client.connect()
             vehicle = self.client.spawn_vehicle()
@@ -146,12 +149,13 @@ class CarlaBridge:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Alpamayo–CARLA driving bridge")
     parser.add_argument("--config", default="config.yaml", help="Path to the YAML configuration")
+    parser.add_argument("--model", choices=tuple(MODEL_IDS), help="Select a variant; switching resets the checkpoint")
     parser.add_argument("--max-steps", type=int)
     parser.add_argument("--no-video", action="store_true")
     parser.add_argument("--recording-dir", default="recordings")
     args = parser.parse_args()
     setup_logging()
-    config = load_config(args.config)
+    config = load_config(args.config, model=args.model)
     max_steps = args.max_steps if args.max_steps is not None else config.get("run", {}).get("max_steps", 60)
     if max_steps <= 0:
         parser.error("max-steps must be positive")

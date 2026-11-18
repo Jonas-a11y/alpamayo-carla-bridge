@@ -11,11 +11,12 @@ from typing import Any, Dict
 import yaml
 
 
-def load_config(path: str | Path = "config.yaml") -> Dict[str, Any]:
+def load_config(path: str | Path = "config.yaml", *, model: str | None = None) -> Dict[str, Any]:
     """Load and return the YAML configuration file.
 
     Args:
         path: Path to the YAML config file.
+        model: Optional variant selection; switching clears the old checkpoint.
 
     Returns:
         Parsed configuration dictionary.
@@ -28,7 +29,20 @@ def load_config(path: str | Path = "config.yaml") -> Dict[str, Any]:
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
     with open(config_path, "r") as f:
-        return yaml.safe_load(f)
+        config = yaml.safe_load(f)
+    if model is not None:
+        from .alpamayo_inference import MODEL_IDS
+
+        if model not in MODEL_IDS:
+            raise ValueError(f"model must be one of {tuple(MODEL_IDS)}")
+        params = config.setdefault("alpamayo", {})
+        if params.get("variant", "edge") != model:
+            params["variant"] = model
+            params.pop("model_id", None)
+            params.pop("revision", None)
+            if model in ("r1", "super"):
+                params.pop("nav_text", None)
+    return config
 
 
 def setup_logging(level: int = logging.INFO) -> logging.Logger:

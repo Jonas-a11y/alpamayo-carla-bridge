@@ -8,6 +8,13 @@ from typing import Any
 
 import numpy as np
 
+MODEL_IDS = {
+    "r1": "nvidia/Alpamayo-R1-10B",
+    "r15": "nvidia/Alpamayo-1.5-10B",
+    "edge": "nvidia/Alpamayo2-Edge",
+    "super": "nvidia/Alpamayo2-Super",
+}
+
 
 @dataclass
 class AlpamayoOutput:
@@ -18,7 +25,7 @@ class AlpamayoOutput:
 
 
 class AlpamayoInference:
-    """Load either Alpamayo 1 or Alpamayo 2 Edge and run its action expert.
+    """Load a published Alpamayo driving model and run its action expert.
 
     Call predict with an ObservationBuffer sample or a dictionary in the
     corresponding upstream dataset format. Imports never download weights.
@@ -27,10 +34,9 @@ class AlpamayoInference:
     def __init__(self, config: dict[str, Any]) -> None:
         self._cfg = config.get("alpamayo", {})
         self.variant = self._cfg.get("variant", "edge")
-        if self.variant not in ("edge", "r1"):
-            raise ValueError("alpamayo.variant must be 'edge' or 'r1'")
-        default_id = "nvidia/Alpamayo2-Edge" if self.variant == "edge" else "nvidia/Alpamayo-R1-10B"
-        self._model_id = self._cfg.get("model_id", default_id)
+        if self.variant not in MODEL_IDS:
+            raise ValueError(f"alpamayo.variant must be one of {tuple(MODEL_IDS)}")
+        self._model_id = self._cfg.get("model_id", MODEL_IDS[self.variant])
         self._device = self._cfg.get("device", "cuda")
         self._dtype = self._cfg.get("dtype", "bfloat16")
         if self._dtype not in ("float32", "float16", "bfloat16"):
@@ -40,6 +46,8 @@ class AlpamayoInference:
         self._helper = None
 
     def load(self) -> None:
+        if self._model is not None:
+            return
         import torch
 
         device = torch.device(self._device)
@@ -60,11 +68,23 @@ class AlpamayoInference:
                 self._model_id, device=self._device, dtype=self._dtype,
                 attn_implementation=attn, **resolve,
             )
-        else:
-            from alpamayo_r1 import helper
-            from alpamayo_r1.models.alpamayo_r1 import AlpamayoR1
+        elif self.variant == "super":
+            from alpamayo2_super import helper
+            from alpamayo2_super.models.alpamayo2_super import Alpamayo2Super
 
-            model = AlpamayoR1.from_pretrained(
+            model = Alpamayo2Super.from_pretrained(
+                self._model_id, dtype=getattr(torch, self._dtype),
+                device_map=self._device, attn_implementation=attn, **resolve,
+            ).eval()
+        else:
+            if self.variant == "r15":
+                from alpamayo1_5 import helper
+                from alpamayo1_5.models.alpamayo1_5 import Alpamayo1_5 as Model
+            else:
+                from alpamayo_r1 import helper
+                from alpamayo_r1.models.alpamayo_r1 import AlpamayoR1 as Model
+
+            model = Model.from_pretrained(
                 self._model_id, dtype=getattr(torch, self._dtype),
                 attn_implementation=attn, **resolve,
             ).eval().to(self._device)
@@ -84,10 +104,13 @@ class AlpamayoInference:
 
         data = {key: torch.from_numpy(value) if isinstance(value, np.ndarray) else value
                 for key, value in sample.items()}
-        if self.variant == "edge":
+        if self.variant in ("edge", "super"):
             inputs = self._helper.prepare_model_inputs(data, self._model.config, self._model.tokenizer)
         else:
-            messages = self._helper.create_message(data["image_frames"].flatten(0, 1))
+            prompt_kwargs = ({"camera_indices": data["camera_indices"],
+                              "nav_text": data.get("nav_text") or None}
+                             if self.variant == "r15" else {})
+            messages = self._helper.create_message(data["image_frames"].flatten(0, 1), **prompt_kwargs)
             tokenized = self._processor.apply_chat_template(
                 messages, tokenize=True, add_generation_prompt=False,
                 continue_final_message=True, return_dict=True, return_tensors="pt",
@@ -107,7 +130,7 @@ class AlpamayoInference:
             "return_extra": True,
         }
         with torch.inference_mode(), autocast:
-            if self.variant == "edge":
+            if self.variant in ("edge", "super"):
                 xyz, rotations, _, extra = self._model.sample_trajectories_from_data(inputs, **settings)
             else:
                 xyz, rotations, extra = self._model.sample_trajectories_from_data_with_vlm_rollout(

@@ -13,3 +13,4 @@ main()
 """], cwd=tmp_path, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert "--config" in result.stdout
+    assert "--model {r1,r15,edge,super}" in result.stdout
