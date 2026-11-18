@@ -203,6 +203,34 @@ L4/A100 are useful targets for Edge; Nano needs at least 24 GB VRAM. T4 lacks
 native BF16, and Super usually exceeds Colab GPU memory. Unsupported GPU/memory
 conditions explicitly skip inference, while all adapter tests still run. The
 notebook reports failures and skips separately and records the tested Bridge
-commit. It starts no CARLA server; an optional short driving test needs your own
-CARLA 0.9.16 server reachable from Colab. A dataset prediction alone does not
-validate closed-loop driving.
+commit. A dataset prediction alone does not validate closed-loop driving.
+
+To try the complete drive in Colab, set `RUN_CARLA_DRIVE=True` and leave
+`START_CARLA_IN_COLAB=True`. The notebook downloads the official CARLA 0.9.16
+Linux archive (about 8.35 GB; reserve at least 35 GB for installation), starts
+it as a separate user in off-screen Vulkan mode and connects to `127.0.0.1`.
+It checks the server version, a real RGB camera frame and the remaining VRAM
+before loading the model for the drive. CARLA's GPU use can make L4 memory
+tight; A100 offers more room. If Colab exposes CUDA without graphics libraries,
+the worker extracts the matching official NVIDIA archive for user-space
+graphics libraries only. It does not run the driver installer. A Colab runtime
+without usable NVIDIA Vulkan is reported as a failure with diagnostic logs.
+The local server mode has not yet been exercised on a real Colab GPU.
+
+The worker stops its own server process group on completion or error. Archives
+and extracted files are outside the report; repeated runs reuse the installation.
+For an external CARLA 0.9.16 server, disable `START_CARLA_IN_COLAB` and fill in
+`CARLA_HOST` with an address reachable from Colab.
+
+For a short preview, enable `RENDER_VIDEO=True`. After successful dataset
+inference, the notebook renders a three-second H.264 MP4 with the actual fixed
+front-wide snapshot at t0 and the animated predicted trajectory. The 6.4-second
+prediction horizon is shown over three seconds. If the CARLA drive succeeds,
+the preview instead composes its recorded camera frames and telemetry. At
+10 frames/s, set `MAX_STEPS=30` for about three seconds of CARLA footage; the
+default three steps yield 0.3 seconds. Rendering adds no driving steps.
+
+The video is displayed in the notebook and exported as `preview.mp4` alongside
+`video.json` in the report ZIP. Without a successful prediction or drive, video
+rendering is explicitly skipped. Isolated workers use Matplotlib's `Agg` backend
+so Colab's kernel-specific inline backend does not prevent imports.

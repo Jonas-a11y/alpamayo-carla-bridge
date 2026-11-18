@@ -24,6 +24,8 @@ before starting a new session.
 | Unexpected/non-finite trajectory | The native action expert returned an invalid output. Confirm upstream source/checkpoint compatibility and dtype/device settings; the bridge stops instead of substituting a path. |
 | Collision detected | The session stops. Inspect the recording, spawn location and calibration before retrying. Restart resets collision state and captures fresh history. |
 | `PIL`/`matplotlib` missing or ffmpeg not found | Install `.[video]` and ffmpeg. `--no-video` skips composition; recording still needs Pillow. Set `recording.enabled: false` for a drive without recording. |
+| Colab: invalid `module://matplotlib_inline.backend_inline` backend | Download the current notebook and rerun its setup cell. The isolated workers set `MPLBACKEND=Agg` before imports. |
+| Colab CARLA cannot start / no NVIDIA Vulkan device | Inspect `carla-server.json`, `carla-server.log`, `vulkan.log` and the first error in `carla-drive.log`. Local mode extracts matching NVIDIA graphics libraries when absent; some runtimes still lack usable Vulkan. Use a compatible GPU runtime or an external CARLA server. CUDA availability alone does not establish RGB rendering. |
 
 For an unresolved problem, include the selected variant, upstream source and
 checkpoint revisions, Python/PyTorch/Transformers/CARLA versions, GPU and the

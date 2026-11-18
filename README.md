@@ -20,7 +20,7 @@ training and advanced multi-GPU navigation CFG are outside this driving API.
 ## Start here
 
 - [Tutorials: laptop setup, first CARLA run and Python usage](docs/TUTORIALS.md)
-- [Colab notebook: install, check all adapters and try real GPU inference](notebooks/alpamayo_colab.ipynb)
+- [Colab notebook: check all adapters, try GPU inference and optionally render video](notebooks/alpamayo_colab.ipynb)
 - [Model selection, installations and input profiles](docs/MODELS.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Camera placement and rear-axle calibration](docs/CAMERA_CONFIG.md)
@@ -90,15 +90,17 @@ nonzero.
 ## Verification and current limits
 
 ~~~bash
-pip install -e '.[edge,test]'
+pip install -e '.[edge,test,video]'
+ffmpeg -version
 python -m pytest -q -m 'not nano_super'
 ~~~
 
 CI checks both the Edge and Nano/Super runtimes. Tests exercise actual upstream
 sample/prompt helpers and model-class imports, mocked action-expert predictions,
 image schedules, pose conversion, frame synchronization, model selection,
-restart behavior and cleanup failures. See the model guide to run the Nano/Super
-checks locally. Tests and core installation do not require model weights.
+restart behavior, cleanup failures and Colab worker/video regressions. Install
+ffmpeg (including ffprobe) for the video checks. See the model guide to run the
+Nano/Super checks locally. Tests and core installation do not require model weights.
 
 Full CUDA model inference and closed-loop CARLA driving have **not** been run on
 this Mac. Passing CPU checks establishes API/data-contract behavior, not driving
