@@ -18,8 +18,10 @@ Layout::
 from __future__ import annotations
 
 import io
+from itertools import groupby
 import json
 import logging
+import math
 import subprocess
 import tempfile
 from pathlib import Path
@@ -29,6 +31,7 @@ import matplotlib
 
 matplotlib.use("Agg")  # Non-interactive backend — no display needed.
 import matplotlib.pyplot as plt
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from .utils import ego_to_world
@@ -42,6 +45,33 @@ _GREEN_RGB = (60, 220, 60)
 _WHITE_RGB = (255, 255, 255)
 _DARK_BG_RGB = (30, 30, 35)
 _STATUS_BG_RGB = (20, 20, 25)
+
+
+def project_trajectory(
+    trajectory: List[List[float]], camera: Dict[str, float],
+    image_size: tuple[int, int], ego_origin_x: float,
+) -> list[tuple[float, float] | None]:
+    """Project ego-plane XY predictions into a CARLA RGB camera.
+
+    Predictions use forward/left coordinates at the configured ego origin.
+    CARLA camera extrinsics use forward/right/up at the actor origin.
+    Points behind the camera's near plane are omitted. Road height is assumed
+    to follow the current ego plane; the bridge's XY output has no height.
+    """
+    if not trajectory:
+        return []
+    width, height = image_size
+    focal = width / (2 * math.tan(math.radians(camera.get("fov", 90)) / 2))
+    pitch, yaw = map(math.radians, (camera.get("pitch", 0), camera.get("yaw", 0)))
+    cp, sp, cy, sy = math.cos(pitch), math.sin(pitch), math.cos(yaw), math.sin(yaw)
+    rotation = np.array([[cp * cy, -sy, -sp * cy],
+                         [cp * sy, cy, -sp * sy], [sp, 0, cp]])
+    xy = np.asarray(trajectory)
+    points = np.column_stack((xy[:, 0] + ego_origin_x, -xy[:, 1], np.zeros(len(xy))))
+    position = [camera.get("x", 1.5), camera.get("y", 0), camera.get("z", 1.6)]
+    local = (points - position) @ rotation
+    return [(width / 2 + focal * right / depth, height / 2 - focal * up / depth)
+            if depth > 0.1 else None for depth, right, up in local]
 
 
 class VideoComposer:
@@ -62,6 +92,9 @@ class VideoComposer:
         self._data_path = self._session_dir / "data.jsonl"
         self._metadata_path = self._session_dir / "metadata.json"
         self._output_path = self._session_dir / "output.mp4"
+        calibration = self._load_metadata().get("config", config or {})
+        self._camera_config = calibration.get("cameras", {})
+        self._ego_origin_x = calibration.get("vehicle", {}).get("rear_axle_x", 0.0)
 
         rec_cfg = (config or {}).get("recording", {})
         self._width: int = rec_cfg.get("video_width", 1920)
@@ -112,7 +145,6 @@ class VideoComposer:
             logger.error("No records found in %s", self._data_path)
             raise FileNotFoundError(f"No data.jsonl in {self._session_dir}")
 
-        metadata = self._load_metadata()
         logger.info(
             "Composing video: %d steps, %dx%d @ %d FPS",
             len(records),
@@ -176,9 +208,10 @@ class VideoComposer:
         # Row 1: front_tele
         tele_img = self._load_frame_image(step, "front_tele")
         if tele_img is not None:
+            tele_img = self._overlay_trajectory(tele_img, record, "front_tele")
             tele_img = tele_img.resize((self._width, row1_h), Image.LANCZOS)
             canvas.paste(tele_img, (0, 0))
-        self._draw_label(canvas, "TELE (30° FOV)", 10, 5)
+        self._draw_label(canvas, "TELE (30° FOV) | cyan: predicted future", 10, 5)
 
         # Row 2: three cameras side by side
         cam_w = self._width // 3
@@ -186,9 +219,13 @@ class VideoComposer:
         for i, cam_name in enumerate(["front_left", "front_wide", "front_right"]):
             cam_img = self._load_frame_image(step, cam_name)
             if cam_img is not None:
+                if cam_name == "front_wide":
+                    cam_img = self._overlay_trajectory(cam_img, record, cam_name)
                 cam_img = cam_img.resize((cam_w, row2_h), Image.LANCZOS)
                 canvas.paste(cam_img, (i * cam_w, y2))
             label = cam_name.replace("front_", "").upper()
+            if cam_name == "front_wide":
+                label += " | predicted future"
             self._draw_label(canvas, label, i * cam_w + 5, y2 + 3)
 
         # Row 3: BEV (left 55%) + Reasoning (right 45%)
@@ -229,6 +266,20 @@ class VideoComposer:
     # ------------------------------------------------------------------
     # Sub-renderers
     # ------------------------------------------------------------------
+
+    def _overlay_trajectory(self, img: Image.Image, record: dict, camera_name: str) -> Image.Image:
+        camera = self._camera_config.get(camera_name)
+        trajectory = record.get("predicted_trajectory", [])
+        if not camera or not trajectory:
+            return img
+        pixels = project_trajectory(trajectory, camera, img.size, self._ego_origin_x)
+        draw = ImageDraw.Draw(img)
+        for visible, group in groupby(pixels, key=lambda point: point is not None):
+            if visible:
+                points = list(group)
+                draw.line(points, fill=(0, 0, 0), width=8)
+                draw.line(points, fill=(40, 230, 255), width=4)
+        return img
 
     def _load_frame_image(self, step: int, cam_name: str) -> Optional[Image.Image]:
         """Load a saved camera frame JPEG.

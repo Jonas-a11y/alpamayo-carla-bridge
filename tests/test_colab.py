@@ -6,10 +6,14 @@ import signal
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 import numpy as np
 from PIL import Image
 import pytest
+
+from bridge import load_config
+from bridge.video_composer import project_trajectory
 
 
 @pytest.fixture
@@ -51,38 +55,99 @@ def test_gpu_worker_imports_with_colab_backend(notebook, runner, monkeypatch, tm
     assert "test-token" not in log and "[redacted]" in log
 
 
-@pytest.mark.parametrize("source,frames", [("dataset", 30), ("carla", 3)])
-def test_optional_video_encodes_real_mp4(notebook, runner, tmp_path, source, frames):
+def test_drive_video_contains_changing_camera_frames_and_path(notebook, runner, tmp_path):
     # Synthetic test fixtures exercise encoding, without claiming model/drive evidence.
+    frames = 30
     xy = np.column_stack((np.linspace(0.1, 32, 64), np.linspace(0, 3, 64))).tolist()
-    image = Image.new("RGB", (320, 180), (60, 110, 160))
-    if source == "dataset":
-        image.save(tmp_path / "front_wide.jpg")
-        (tmp_path / "prediction.json").write_text(json.dumps({"variant": "edge", "trajectory": xy}))
-    else:
-        session = tmp_path / "recordings/test"
-        (session / "frames").mkdir(parents=True)
-        records = []
-        for step in range(1, frames + 1):
-            for camera in ("front_left", "front_wide", "front_right", "front_tele"):
-                image.save(session / "frames" / f"step_{step:04d}_{camera}.jpg")
-            records.append(json.dumps({"step": step, "predicted_trajectory": xy,
-                                       "actual_position": [step, 0], "reasoning_trace": "Test fixture"}))
-        (session / "data.jsonl").write_text("\n".join(records))
-        (tmp_path / "carla.json").write_text(json.dumps({"steps": frames, "session": "recordings/test"}))
+    session = tmp_path / "recordings/test"
+    (session / "frames").mkdir(parents=True)
+    config = load_config(Path(__file__).parents[1] / "config.yaml")
+    (session / "metadata.json").write_text(json.dumps({"config": config}))
+    records = []
+    for step in range(1, frames + 1):
+        image = Image.new("RGB", (320, 180), (60 + step * 3, 110, 160))
+        for camera in ("front_left", "front_wide", "front_right", "front_tele"):
+            image.save(session / "frames" / f"step_{step:04d}_{camera}.jpg")
+        records.append(json.dumps({"step": step, "predicted_trajectory": xy,
+                                   "actual_position": [step, 0], "reasoning_trace": "Test fixture"}))
+    (session / "data.jsonl").write_text("\n".join(records))
+    (tmp_path / "carla.json").write_text(json.dumps({"steps": frames, "session": "recordings/test"}))
     script = embedded_script(notebook["video"], "VIDEO_RENDER")
-    runner["run_check"]("video-render", [sys.executable, "-c", script, str(tmp_path), source])
+    runner["run_check"]("video-render", [sys.executable, "-c", script, str(tmp_path)])
+    output = tmp_path / "carla-drive.mp4"
     probe = subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0",
         "-show_entries", "stream=codec_name,pix_fmt,nb_frames,duration,width,height",
-        "-of", "json", str(tmp_path / "preview.mp4")], text=True)
+        "-of", "json", str(output)], text=True)
     stream = json.loads(probe)["streams"][0]
     assert stream["codec_name"] == "h264" and stream["pix_fmt"] == "yuv420p"
     assert (stream["width"], stream["height"]) == (1280, 720)
     assert int(stream["nb_frames"]) == frames
     assert float(stream["duration"]) == pytest.approx(frames / 10, abs=0.01)
     info = json.loads((tmp_path / "video.json").read_text())
-    assert info["source"] == ("dataset-prediction" if source == "dataset" else "carla")
+    assert info["source"] == "carla"
     assert info["seconds"] == frames / 10
+    decoded = subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(output),
+        "-vf", f"select='eq(n,0)+eq(n,{frames - 1})'", "-vsync", "0",
+        "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+    first, last = np.frombuffer(decoded, dtype=np.uint8).reshape(2, 720, 1280, 3)
+    # A patch away from labels/path changes with the saved camera frames.
+    assert abs(int(last[260, 640, 0]) - int(first[260, 640, 0])) > 60
+    camera_views = last[:396]
+    cyan = ((camera_views[:, :, 0] < 90) & (camera_views[:, :, 1] > 180)
+            & (camera_views[:, :, 2] > 180))
+    assert cyan.sum() > 20  # The projected path survives H.264 encoding.
+
+
+def test_projection_respects_camera_pose_left_axis_and_rear_axle():
+    camera = {"fov": 90, "x": 1, "y": 0, "z": 1, "pitch": 0, "yaw": 0}
+    pixels = project_trajectory([[10, 0], [10, 2], [0, 0]], camera, (200, 100), -1)
+    assert pixels[0] == pytest.approx((100, 62.5))
+    assert pixels[1] == pytest.approx((75, 62.5))  # Left stays left on screen.
+    assert pixels[2] is None
+    camera.update(yaw=90, x=0)
+    assert project_trajectory([[0, -10]], camera, (200, 100), 0)[0] == pytest.approx((100, 60))
+    camera.update(yaw=0, pitch=-45, x=1)
+    assert project_trajectory([[2, 0]], camera, (200, 100), 0)[0] == pytest.approx((100, 50))
+
+
+def test_failed_drive_does_not_render_a_snapshot_video(notebook, runner, tmp_path):
+    runner.update(RENDER_VIDEO=True, SELECTED_PYTHON=sys.executable,
+                  RESULTS={"carla-drive": {"status": "FAILED"}, "gpu-inference": {"status": "PASSED"}})
+    exec(compile(notebook["video"], "<Colab video>", "exec"), runner)
+    assert runner["RESULTS"]["video-render"]["status"] == "SKIPPED"
+    assert "CARLA" in runner["RESULTS"]["video-render"]["reason"]
+    assert not list(tmp_path.glob("*.mp4"))
+
+
+def test_headless_vulkan_uses_cached_egl_driver(notebook, tmp_path, monkeypatch):
+    driver = "580.82.07"
+    graphics = tmp_path / f"nvidia-graphics-{driver}"
+    graphics.mkdir()
+    (graphics / f"libEGL_nvidia.so.{driver}").touch()
+    (graphics / "nvidia_icd.json").write_text(json.dumps({"ICD": {"api_version": "1.4.312"}}))
+    home = tmp_path / "user"
+    home.mkdir()
+    user = SimpleNamespace(pw_dir=str(home), pw_uid=os.getuid(), pw_gid=os.getgid(), pw_name="carla-test")
+    monkeypatch.setattr(os, "chown", lambda *args: None)
+
+    def run(command, **kwargs):
+        if "vulkaninfo" in command:
+            icd = json.loads(Path(kwargs["env"]["VK_ICD_FILENAMES"]).read_text())
+            assert icd["ICD"]["library_path"] == str(graphics / f"libEGL_nvidia.so.{driver}")
+            assert icd["ICD"]["api_version"] == "1.4.312"
+            return subprocess.CompletedProcess(command, 0, "deviceName = NVIDIA L4", "")
+        return subprocess.CompletedProcess(command, 0, "NVIDIA L4", "")
+
+    tree = ast.parse(embedded_script(notebook["carla"], "CARLA_LOCAL"))
+    preparation = next(node for node in tree.body if isinstance(node, ast.Try)).body
+    end = next(i for i, node in enumerate(preparation) if isinstance(node, ast.Assign)
+               and getattr(node.targets[0], "id", "") == "client")
+    scope = dict(Path=Path, json=json, os=os, root=tmp_path, report=tmp_path, info={},
+                 pwd=SimpleNamespace(getpwnam=lambda _: user),
+                 ctypes=SimpleNamespace(util=SimpleNamespace(find_library=lambda _: None)),
+                 subprocess=SimpleNamespace(run=run, check_output=lambda *args, **kwargs: driver))
+    exec(compile(ast.Module(body=preparation[:end], type_ignores=[]), "<Colab Vulkan preparation>", "exec"), scope)
+    assert scope["info"]["vulkan_icd"].endswith(f"libEGL_nvidia.so.{driver}")
 
 
 @pytest.fixture
