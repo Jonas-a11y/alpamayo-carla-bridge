@@ -150,6 +150,70 @@ def test_headless_vulkan_uses_cached_egl_driver(notebook, tmp_path, monkeypatch)
     assert scope["info"]["vulkan_icd"].endswith(f"libEGL_nvidia.so.{driver}")
 
 
+@pytest.mark.parametrize("failure", ["dependencies", "engine"])
+def test_local_start_uses_configured_map_and_preserves_failure_logs(notebook, tmp_path, monkeypatch, failure):
+    report = tmp_path / "report"
+    report.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    driver = "580.82.07"
+    graphics = tmp_path / f"nvidia-graphics-{driver}"
+    graphics.mkdir()
+    (graphics / f"libEGL_nvidia.so.{driver}").touch()
+    server = tmp_path / "carla-0.9.16"
+    server.mkdir()
+    (server / ".installed").touch()
+    (tmp_path / "settings.json").write_text(json.dumps({"carla_port": 2000, "variant": "edge"}))
+    config = load_config(Path(__file__).parents[1] / "config.yaml")
+    monkeypatch.setattr("bridge.load_config", lambda *args, **kwargs: config)
+    monkeypatch.setattr("ctypes.util.find_library", lambda _: None)
+    monkeypatch.setattr(os, "chown", lambda *args: None)
+    monkeypatch.setattr(os, "killpg", lambda *args: None)
+    import pwd
+    monkeypatch.setattr(pwd, "getpwnam", lambda _: SimpleNamespace(
+        pw_dir=str(home), pw_uid=os.getuid(), pw_gid=os.getgid(), pw_name="carla-test"))
+    monkeypatch.setattr(sys, "argv", ["worker", str(tmp_path), str(report)])
+    monkeypatch.setitem(sys.modules, "carla", SimpleNamespace(Client=lambda *args: Client()))
+    monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: driver)
+
+    class Client:
+        def set_timeout(self, _):
+            pass
+
+        def get_server_version(self):
+            raise RuntimeError("RPC unavailable")
+
+    process = SimpleNamespace(pid=12345, returncode=1, poll=lambda: 1, wait=lambda **kwargs: 1)
+
+    def run(command, **kwargs):
+        output = "deviceName = NVIDIA L4"
+        if "ldd" in command:
+            output = "libmissing.so => not found" if failure == "dependencies" else "libc.so.6 => /lib/libc.so.6"
+        return subprocess.CompletedProcess(command, 0, output, "")
+
+    def start(command, **kwargs):
+        log = next(arg.removeprefix("-abslog=") for arg in command if arg.startswith("-abslog="))
+        Path(log).write_text("LogVulkanRHI: test engine failure\n")
+        return process
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "Popen", start)
+    script = embedded_script(notebook["carla"], "CARLA_LOCAL")
+    with pytest.raises(RuntimeError, match="dependencies|exited before RPC readiness"):
+        exec(compile(script, "<Colab local server>", "exec"), {})
+    info = json.loads((report / "carla-server.json").read_text())
+    assert info["status"] == "FAILED" and info["error"]
+    if failure == "dependencies":
+        assert "libmissing.so => not found" in (report / "carla-dependencies.log").read_text()
+        assert "command" not in info
+    else:
+        assert info["initial_map"] == "/Game/Carla/Maps/Town03"
+        assert "CarlaUE4-Linux-Shipping" in " ".join(info["command"])
+        assert "-unattended" in info["command"]
+        assert info["command"].index(info["initial_map"]) > info["command"].index("CarlaUE4")
+        assert "test engine failure" in (report / "carla-engine.log").read_text()
+
+
 @pytest.fixture
 def server_lifecycle(notebook):
     tree = ast.parse(embedded_script(notebook["carla"], "CARLA_LOCAL"))
@@ -198,6 +262,23 @@ def test_local_server_start_failure_is_reported(server_lifecycle, mode, exceptio
         if mode == "crash":
             process.wait(timeout=2)
         with pytest.raises(exception, match="CARLA"):
+            server_lifecycle["wait_for_server"](process, Client(), timeout=0.1)
+    finally:
+        server_lifecycle["stop_server"](process)
+
+
+def test_local_server_reports_world_readiness_failure(server_lifecycle):
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True)
+
+    class Client:
+        def get_server_version(self):
+            return "0.9.16"
+
+        def get_world(self):
+            raise RuntimeError("map still loading")
+
+    try:
+        with pytest.raises(TimeoutError, match="world not ready.*map still loading"):
             server_lifecycle["wait_for_server"](process, Client(), timeout=0.1)
     finally:
         server_lifecycle["stop_server"](process)
