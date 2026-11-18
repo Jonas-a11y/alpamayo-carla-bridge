@@ -216,7 +216,11 @@ GPU memory and process states are recorded before shutdown.
 
 A fresh installation needs about 8.35 GB download and 35 GB free disk. Running
 both notebooks in the same Colab runtime reuses `/content/alpamayo-bridge-check`'s
-CARLA installation. An occupied RPC port fails explicitly; stop the existing
+CARLA installation. Interrupted CARLA/graphics downloads resume from their
+existing file size over HTTP/1.1; connection resets and incomplete transfers get
+up to four attempts. If they still fail, rerun the test cell in the same runtime
+to keep the downloaded prefix. A runtime reset discards it.
+An occupied RPC port fails explicitly; stop the existing
 server or reset the runtime before rerunning. The actual Colab startup outcome
 still needs testing.
 
