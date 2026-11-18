@@ -191,6 +191,41 @@ memory/latency and closed-loop behavior on the target CUDA/CARLA host.
 
 ## 6. Validate on Google Colab
 
+### Test CARLA first
+
+Upload [carla_colab.ipynb](../notebooks/carla_colab.ipynb) to
+[Google Colab](https://colab.research.google.com/), choose a GPU runtime, and
+select **Runtime → Run all**. It installs only the CARLA 0.9.16 client, NumPy,
+Pillow and Linux/video packages; no model download or Hugging Face login is needed.
+Keep `MAP="Town01"` and `RENDER_VIDEO=True` for the first run.
+
+The first test, `cpu-rpc`, starts the native server with rendering disabled and
+checks its version and world API. The second, `gpu-rgb`, starts it with offscreen
+NVIDIA Vulkan at standard graphics quality, spawns one RGB camera and drives
+with fixed throttle. It requires nonempty images, increasing frame IDs, at least
+15 distinct images out of 30 and at least 0.5 m of vehicle movement. A passing test produces
+30 camera frames at 10 Hz and displays `gpu-rgb/carla-camera.mp4` (three seconds).
+
+Each test stops its own server. A failed CPU test still allows the GPU test and
+report export. Download `carla-only-report.zip` from the final cell; it contains
+`summary.json`, each test's `result.json`, logs and the video when successful.
+Compare the two statuses: CPU success confirms engine/RPC access, while GPU
+success also confirms usable camera rendering. For a failure, inspect `phase`,
+`error`, `server.log`, `vulkan.log`, `dependencies.log` and `engine.log` when present.
+GPU memory and process states are recorded before shutdown.
+
+A fresh installation needs about 8.35 GB download and 35 GB free disk. Running
+both notebooks in the same Colab runtime reuses `/content/alpamayo-bridge-check`'s
+CARLA installation. Interrupted CARLA/graphics downloads resume from their
+existing file size over HTTP/1.1; connection resets and incomplete transfers get
+up to four attempts. If they still fail, rerun the test cell in the same runtime
+to keep the downloaded prefix. A runtime reset discards it.
+An occupied RPC port fails explicitly; stop the existing
+server or reset the runtime before rerunning. The actual Colab startup outcome
+still needs testing.
+
+### Test Alpamayo and the bridge
+
 Download [alpamayo_colab.ipynb](../notebooks/alpamayo_colab.ipynb), upload it to
 [Google Colab](https://colab.research.google.com/), choose a GPU runtime, and run
 the cells in order. The notebook installs managed Python 3.12 environments for
@@ -228,7 +263,8 @@ reach RPC readiness. The worker now launches the configured map directly
 unattended mode and exports console, Vulkan-loader and dependency diagnostics,
 plus the engine log when the packaged build produces one. Timeout messages
 distinguish RPC connection from world loading and retain the last API error.
-This startup correction still needs a real Colab rerun.
+The subsequent run still timed out at RPC readiness; use the CARLA-only notebook
+above to diagnose the simulator separately.
 
 The worker stops its own server process group on completion or error. Archives
 and extracted files are outside the report; repeated runs reuse the installation.
