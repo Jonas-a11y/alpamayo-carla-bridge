@@ -105,8 +105,9 @@ Nano/Super checks locally. Tests and core installation do not require model weig
 Edge checkpoint inference passed on one official NVIDIA clip in Colab with an
 L4 and BF16: 64 finite XY waypoints, 5.03 s inference and 6.18 GB peak allocated
 GPU memory for one candidate. R1/1.5/Super checkpoint runs and closed-loop CARLA
-driving remain unverified. The first local Colab CARLA attempt failed at Vulkan
-initialization; the notebook now uses NVIDIA's headless EGL ICD and needs a rerun.
+driving remain unverified. A follow-up Colab run confirmed headless EGL/Vulkan
+on the L4, but CARLA did not reach RPC readiness. The notebook now starts the
+configured map directly and exports startup diagnostics; this needs a rerun.
 CPU checks and a single dataset clip do not establish driving quality or
 real-time performance. CARLA imagery differs from the training data.
 The camera rig and approximate rear-axle origin require target-vehicle calibration.

@@ -221,9 +221,14 @@ room. If Colab exposes CUDA without graphics libraries,
 the worker extracts the matching official NVIDIA archive for user-space
 graphics libraries only. It does not run the driver installer. A Colab runtime
 without usable NVIDIA Vulkan is reported as a failure with diagnostic logs.
-The supplied L4 run confirmed real Edge inference, but CARLA failed at its GLX
-Vulkan ICD. The corrected worker uses NVIDIA's documented EGL ICD for environments
-without X11. This startup correction still needs a real Colab rerun.
+The supplied L4 runs confirmed real Edge inference and, after switching to
+NVIDIA's headless EGL ICD, Vulkan device enumeration. CARLA still failed to
+reach RPC readiness. The worker now launches the configured map directly
+(Town03 by default), avoiding the release's initial Town10HD_Opt load. It uses
+unattended mode and exports console, Vulkan-loader and dependency diagnostics,
+plus the engine log when the packaged build produces one. Timeout messages
+distinguish RPC connection from world loading and retain the last API error.
+This startup correction still needs a real Colab rerun.
 
 The worker stops its own server process group on completion or error. Archives
 and extracted files are outside the report; repeated runs reuse the installation.
