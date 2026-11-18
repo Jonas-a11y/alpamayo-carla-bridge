@@ -54,7 +54,7 @@ def carla_rotation_to_yaw_rad(rotation: Any) -> float:
         rotation: A ``carla.Rotation`` object.
 
     Returns:
-        Yaw angle in radians (counter-clockwise positive).
+        CARLA yaw in radians (clockwise positive in its left-handed world).
     """
     return math.radians(rotation.yaw)
 
@@ -96,7 +96,7 @@ def world_to_ego(
     cos_yaw = math.cos(ego_yaw_rad)
     sin_yaw = math.sin(ego_yaw_rad)
     local_x = dx * cos_yaw + dy * sin_yaw
-    local_y = -dx * sin_yaw + dy * cos_yaw
+    local_y = dx * sin_yaw - dy * cos_yaw
     return local_x, local_y
 
 
@@ -121,6 +121,6 @@ def ego_to_world(
     """
     cos_yaw = math.cos(ego_yaw_rad)
     sin_yaw = math.sin(ego_yaw_rad)
-    world_x = ego_x + local_x * cos_yaw - local_y * sin_yaw
-    world_y = ego_y + local_x * sin_yaw + local_y * cos_yaw
+    world_x = ego_x + local_x * cos_yaw + local_y * sin_yaw
+    world_y = ego_y + local_x * sin_yaw - local_y * cos_yaw
     return world_x, world_y

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "alpamayo-carla-bridge"
+version = "0.2.0"
+description = "Importable Alpamayo 1 and Alpamayo 2 Edge bridge for CARLA"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "pyyaml>=6.0"]
+
+[project.optional-dependencies]
+edge = ["alpamayo2-edge @ git+https://github.com/NVlabs/alpamayo2-edge.git@02f55a7aeabc1a2b9f7a80445c08e40bddc89f5e"]
+r1 = ["torch==2.8.0", "torchvision==0.23.0", "transformers==4.57.1",
+      "einops>=0.8.1", "hydra-core>=1.3.2", "scipy", "colorlog>=6.0", "pillow>=12.0"]
+carla = ["carla==0.9.16"]
+video = ["pillow>=10.0", "matplotlib>=3.8"]
+test = ["pytest>=8.0", "torch==2.8.0"]
+
+[project.scripts]
+alpamayo-carla-drive = "bridge.driver:main"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["bridge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

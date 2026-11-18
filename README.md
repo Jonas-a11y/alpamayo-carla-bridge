@@ -1,216 +1,176 @@
-# Alpamayo–CARLA Bridge 🚗🧠
+# Alpamayo–CARLA Bridge
 
-Connect [NVIDIA Alpamayo-R1](https://huggingface.co/nvidia/Alpamayo-R1-10B) — a Vision-Language-Action (VLA) model for autonomous driving — to the [CARLA](https://carla.org/) open-source simulator. Drive a virtual Tesla Model 3 using Alpamayo's predicted trajectories, record every frame, and produce a composite analysis video.
+An importable Python bridge between CARLA and NVIDIA's Alpamayo action experts.
+It supports **Alpamayo 2 Edge** (the default) and **Alpamayo 1 / R1**, returning
+64 ego-frame waypoints at +0.1 through +6.4 seconds and their reasoning.
+The bridge uses native trajectory APIs and propagates failures instead of
+substituting fabricated trajectories.
 
-> **CPU-only by default.** This project is designed to run inference on CPU with PyTorch SDPA attention so you don't need a beefy GPU.
+## Install the core on any laptop
 
----
+From this checkout:
 
-## Features
-
-| Feature | Description |
-|---------|-------------|
-| **4-camera rig** | front-wide (120°), front-left (70°), front-right (70°), front-tele (30°) |
-| **Alpamayo inference** | 64-waypoint trajectory (6.4 s horizon) + natural-language reasoning trace |
-| **PID controller** | Lateral + longitudinal PID converts waypoints → throttle / steer / brake |
-| **Per-step recording** | JPEG frames, JSONL telemetry, metadata snapshot |
-| **Composite video** | Multi-view + BEV trajectory map + reasoning overlay + status bar |
-| **Crash detection** | Collision sensor stops the loop immediately |
-| **Synchronous mode** | CARLA waits for inference — deterministic, no frame drops |
-
----
-
-## Prerequisites
-
-| Requirement | Version |
-|-------------|---------|
-| CARLA simulator | **0.9.15+** (server must be running before you launch the bridge) |
-| Python | **3.10 – 3.12** |
-| ffmpeg | Any recent version (`brew install ffmpeg` / `apt install ffmpeg`) |
-| HuggingFace account | Access to the **gated** model `nvidia/Alpamayo-R1-10B` — request access on the model page, then `huggingface-cli login` |
-
----
-
-## Installation
-
-### Windows (primary target)
-
-```powershell
-# 1. Clone
-git clone https://github.com/Jonas-a11y/alpamayo-carla-bridge.git
-cd alpamayo-carla-bridge
-
-# 2. Create a venv
+~~~bash
 python -m venv .venv
-.venv\Scripts\activate
+source .venv/bin/activate
+pip install -e .
+alpamayo-carla-drive --help
+~~~
 
-# 3. Install the CARLA Python API
-#    (copy the .whl from your CARLA installation, e.g. PythonAPI\carla\dist\)
-pip install path\to\carla-0.9.15-cpXX-cpXX-win_amd64.whl
+The distribution is named 'alpamayo-carla-bridge'; the import is 'bridge'.
+The core needs only NumPy and PyYAML. Importing it does not require CARLA,
+PyTorch, Transformers, model weights, or a network connection. Model and video
+packages are installed separately.
 
-# 4. Install remaining deps
-pip install -r requirements.txt
+## Edge runtime on a GPU host
 
-# 5. Install ffmpeg (if not installed)
-#    Option A: winget install ffmpeg
-#    Option B: download from https://ffmpeg.org/download.html and add to PATH
+Use **Python 3.12**, a Linux host with a compatible NVIDIA CUDA driver and BF16
+support, and matching CARLA server/client versions. NVIDIA recommends at least
+16 GB VRAM for Edge BF16 inference; more candidates can require more memory.
+The Mac can install the core and run CPU checks, but full model inference and
+a CARLA server on macOS have not been validated here.
 
-# 6. Log in to HuggingFace (needed for gated model download)
-huggingface-cli login
-```
+~~~bash
+pip install -e '.[edge,carla,video]'
+hf auth login
+# Start a CARLA 0.9.16 server in another terminal, then:
+alpamayo-carla-drive --config config.yaml --max-steps 60
+~~~
 
-### Linux / macOS
+The Edge extra pins upstream code and its native dependencies (PyTorch 2.8.0,
+torchvision 0.23.0, Transformers 5.17.0). SDPA is the default; FlashAttention is
+optional. The config pins the released Edge checkpoint revision. Obtain model
+access on [Hugging Face](https://huggingface.co/nvidia/Alpamayo2-Edge).
+CARLA observations do not require the PhysicalAI-AV dataset or its SDK.
 
-```bash
-# 1. Clone
-git clone https://github.com/Jonas-a11y/alpamayo-carla-bridge.git
-cd alpamayo-carla-bridge
+The CARLA extra installs 0.9.16, which has Python 3.12 wheels for Linux x86_64
+and Windows. Install a client wheel matching your actual server. CARLA 0.9.15's
+published wheels do not cover Python 3.12; it requires a compatible custom build
+if you must retain that server. Windows uses the same package commands after
+activating the venv with '.venv/Scripts/Activate.ps1' in PowerShell; NVIDIA's
+Edge inference reference runtime is Linux.
 
-# 2. Create a venv
-python -m venv .venv && source .venv/bin/activate
+Optional MP4 composition requires ffmpeg on PATH. Use '--no-video' to skip it,
+and 'recording.enabled: false' to disable frame recording.
 
-# 3. Install the CARLA Python API
-pip install /path/to/carla-0.9.15-cpXX-cpXX-linux_x86_64.whl
+## Python API
 
-# 4. Install remaining deps
-pip install -r requirements.txt
+~~~python
+from bridge import CarlaBridge, load_config
 
-# 5. Log in to HuggingFace
-huggingface-cli login
-```
+config = load_config("/path/to/alpamayo-carla-bridge/config.yaml")
+config["recording"]["enabled"] = False
 
----
+with CarlaBridge(config) as bridge:
+    for _ in range(60):
+        result = bridge.step(nav_text="Follow the current lane.")
+        print(result.state.timestamp_us, result.output.trajectory, result.output.reasoning)
+~~~
 
-## Quick Start
+'start()' loads the model, connects, spawns sensors and captures a real history
+while braking. The context manager destroys its actors and restores previous
+world settings. Each 'step()' advances a tick, matches camera frame IDs to that
+tick, prepares the native input, runs inference and applies control. The simulator
+waits while the model computes. An inference error, missing sensor, incorrect
+frame or collision raises an error; a failed step commands a brake. CLI failures
+exit nonzero.
 
-### Windows
+For inference on already prepared observations:
 
-```powershell
-# Terminal 1 — start CARLA server
-CarlaUE4.exe -quality-level=Low
+~~~python
+from bridge import AlpamayoInference, ObservationBuffer
 
-# Terminal 2 — run the bridge
-python scripts\run_drive.py                       # uses config.yaml defaults
-python scripts\run_drive.py --config my.yaml      # custom config
-python scripts\run_drive.py --max-steps 120       # override step limit
-```
+inference = AlpamayoInference(config)
+inference.load()
+buffer = ObservationBuffer("edge")
+# At each 0.1-second tick: buffer.append(camera_frames, ego_state)
+# camera_frames: dict[str, CameraFrame(frame, timestamp_us, rgb_uint8)]
+# ego_state: EgoState with the same frame/timestamp, pose and CARLA angles.
+# After buffer.ready:
+output = inference.predict(buffer.sample("Turn right in 30m"))
+~~~
 
-### Linux / macOS
+'predict()' also accepts the raw tensor dictionary documented by the matching
+upstream loader. It uses candidate zero and its reasoning, without ranking Edge's
+placeholder log probabilities or using future ground truth.
 
-```bash
-# Terminal 1 — start CARLA server
-./CarlaUE4.sh -quality-level=Low -RenderOffScreen
+## Input profiles and coordinates
 
-# Terminal 2 — run the bridge
-python scripts/run_drive.py                       # uses config.yaml defaults
-python scripts/run_drive.py --config my.yaml      # custom config
-python scripts/run_drive.py --max-steps 120       # override step limit
-```
+| Variant | Cameras | Image schedule relative to the current tick | Ego history |
+| --- | --- | --- | --- |
+| Edge | IDs 0, 1, 2, 3, 5, 6 | Front wide/tele: −2, −1, −0.5, −0.1, 0 s; others: −1, −0.1, 0 s (22 images) | 20 poses, −1.9 through 0 s |
+| R1 | IDs 0, 1, 2, 6 | Four frames per camera: −0.3, −0.2, −0.1, 0 s | 16 poses, −1.5 through 0 s |
 
-The driving loop will:
+The bridge requires synchronous 0.1-second ticks and never pads missing images
+or poses. Images retain their captured simulation timestamps. Edge's helper
+applies checkpoint-native normalization, camera/time labels and pixel budgets.
 
-1. Connect to CARLA and load the configured map (default: `Town03`).
-2. Spawn the ego vehicle at a random point.
-3. Attach four cameras + a collision sensor.
-4. Load Alpamayo on CPU.
-5. Run up to **60 steps** (configurable) or until a collision.
-6. Save recordings to `recordings/<session_id>/`.
-7. Auto-compose a composite video → `recordings/<session_id>/output.mp4`.
+Model XY uses **x forward, y left, meters**. CARLA uses Y right. The bridge
+reflects position and rotation bases and transforms history into the current ego
+frame, including pitch and roll. The controller steers left for positive model Y
+and estimates speed using the model's fixed 0.1-second waypoint spacing.
 
-### Compose video from an existing recording
+Edge's training origin is the rear axle. 'vehicle.rear_axle_x: -1.4' is an
+approximate Model 3 offset from the CARLA actor origin; calibrate it for the actual
+vehicle. State and recorded positions refer to this origin. Camera attachment
+coordinates refer to the actor origin. The rig approximates the training rig;
+neither its calibration nor driving quality has been measured in CARLA here.
+See [camera configuration](docs/CAMERA_CONFIG.md).
 
-```bash
-python scripts/compose_video.py recordings/<session_id>
-```
+'alpamayo.nav_text' is explicit driving intent. The default requests lane following;
+it is not a route generated from CARLA's map. Change it per step or in the config.
 
----
+## Alpamayo 1 / R1
 
-## Configuration
+Use a **separate Python 3.12 environment**: R1's Transformers 4.57.1 conflicts
+with Edge's Transformers 5.17.0. The R1 extra provides SDPA runtime dependencies;
+install upstream code without its mandatory FlashAttention dependency, which
+is unused by the selected SDPA path:
 
-All settings live in **`config.yaml`**. Key sections:
+~~~bash
+pip install -e '.[r1,carla,video]'
+pip install --no-deps 'alpamayo_r1 @ git+https://github.com/NVlabs/alpamayo.git@11a0e01c13a5622377c45ee37d653351453ec43b'
+hf auth login
+~~~
 
-| Section | What it controls |
-|---------|-----------------|
-| `carla` | Server host/port, map name, sync mode, tick delta |
-| `vehicle` | Blueprint ID |
-| `cameras` | Resolution, per-camera FOV / position / orientation |
-| `alpamayo` | Model ID, device (`cpu` / `cuda`), attention impl |
-| `controller` | PID gains, target speed, actuator limits |
-| `run` | `max_steps` — hard cap on driving loop iterations |
-| `recording` | Enable/disable, FPS, output video resolution |
+In a copy of 'config.yaml' set 'alpamayo.variant: r1' and
+'alpamayo.model_id: nvidia/Alpamayo-R1-10B', and remove the Edge 'revision'.
+R1 uses four cameras and the native
+'sample_trajectories_from_data_with_vlm_rollout' method. NVIDIA recommends at
+least 24 GB VRAM for R1. CPU float32 is configurable for experimentation but
+full CPU inference is not validated by these checks.
 
-> **Switching to GPU:** set `alpamayo.device: "cuda"` and optionally change `attn_implementation` to `"flash_attention_2"` if your card supports it.
+## Verification
 
----
+~~~bash
+pip install -e '.[edge,test]'
+python -m pytest -q
+~~~
 
-## Video Output
+CPU checks exercise the real Edge sample validator and prompt builder, native
+adapter contracts using mocked model outputs, coordinate conversion, camera
+frame matching, braking on inference failure and lifecycle cleanup. CI runs
+without model weights or a CARLA server. Passing establishes API and data-contract
+behavior, not CUDA inference quality or closed-loop performance. A GPU/CARLA
+smoke run remains necessary on the target host.
 
-The composite video layout:
+Source-checkout scripts remain available:
 
-```
-┌─────────────────────────────────────────────┐
-│              front_tele (Zoom)               │
-├────────────┬─────────────┬──────────────────┤
-│ front_left │ front_wide  │   front_right    │
-├────────────┴─────────────┴──────────────────┤
-│  BEV Trajectory Map     │  Reasoning Trace  │
-│  blue = predicted       │  (typewriter fx)  │
-│  red  = actual path     │                   │
-│  green = ego position   │                   │
-├──────────────────────────┴──────────────────┤
-│  Status Bar: Speed | Step X/60 | Timer      │
-└─────────────────────────────────────────────┘
-```
+~~~bash
+python scripts/run_drive.py --config config.yaml
+python scripts/setup_carla_cameras.py --config config.yaml
+python scripts/compose_video.py recordings/SESSION --config config.yaml
+~~~
 
----
-
-## Project Structure
-
-```
-alpamayo-carla-bridge/
-├── config.yaml                 # All tunables
-├── requirements.txt
-├── bridge/
-│   ├── __init__.py
-│   ├── carla_client.py         # CARLA connection & world setup
-│   ├── camera_manager.py       # Spawn & manage camera sensors
-│   ├── ego_motion.py           # Ego-state history tracker
-│   ├── alpamayo_inference.py   # Model loading & inference
-│   ├── trajectory_controller.py# PID controller
-│   ├── recorder.py             # Per-step frame & telemetry saver
-│   ├── video_composer.py       # Composite video renderer
-│   └── utils.py                # Shared helpers
-├── scripts/
-│   ├── run_drive.py            # Main entry point
-│   ├── compose_video.py        # Standalone video composer
-│   └── setup_carla_cameras.py  # Camera debug / preview utility
-├── docs/
-│   ├── ARCHITECTURE.md         # Pipeline & data-flow diagrams
-│   └── CAMERA_CONFIG.md        # Camera placement guide
-└── recordings/                 # Auto-created per session
-```
-
----
-
-## Known Limitations
-
-- **Domain gap** — Alpamayo was trained on real-world driving data; CARLA's rendered world looks different. Expect degraded trajectory quality.
-- **CPU speed** — Inference on CPU is *slow* (seconds per step). Synchronous mode ensures correctness but makes real-time driving impossible.
-- **No traffic** — The default config does not spawn NPC vehicles or pedestrians. Add them via CARLA's Traffic Manager if desired.
-- **Model gating** — `nvidia/Alpamayo-R1-10B` is a gated model. You must request and be granted access on HuggingFace before downloading.
-- **CARLA API compatibility** — Tested with CARLA 0.9.15. Older versions may have breaking API changes.
-
----
+Recordings contain every active camera and JSONL telemetry. The composite video
+currently displays the four front views plus trajectories and reasoning.
 
 ## References
 
-- **Alpamayo model:** <https://huggingface.co/nvidia/Alpamayo-R1-10B>
-- **Alpamayo code / paper:** <https://github.com/NVlabs/alpamayo>
-- **CARLA simulator:** <https://carla.org/>
-- **CARLA Python API docs:** <https://carla.readthedocs.io/>
+- [Alpamayo 2 Edge code and input contract](https://github.com/NVlabs/alpamayo2-edge)
+- [Alpamayo 2 Edge checkpoint](https://huggingface.co/nvidia/Alpamayo2-Edge)
+- [Alpamayo 1 / R1 code](https://github.com/NVlabs/alpamayo)
+- [CARLA documentation](https://carla.readthedocs.io/)
+- [Architecture](docs/ARCHITECTURE.md)
 
----
-
-## License
-
-MIT — see individual dependencies for their licenses.
+MIT project; dependencies and model weights have their own licenses.

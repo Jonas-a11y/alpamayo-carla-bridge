@@ -8,6 +8,7 @@ carla:
 
 vehicle:
   blueprint: "vehicle.tesla.model3"
+  rear_axle_x: -1.4  # Approximate rear-axle offset from actor origin; calibrate for other vehicles.
 
 cameras:
   resolution: [800, 600]
@@ -19,19 +20,19 @@ cameras:
     pitch: 0
     yaw: 0
   front_left:
-    fov: 70
-    x: 1.5
-    y: -0.3
+    fov: 120
+    x: 0.6
+    y: -0.9
     z: 1.6
     pitch: 0
-    yaw: -30
+    yaw: -90
   front_right:
-    fov: 70
-    x: 1.5
-    y: 0.3
+    fov: 120
+    x: 0.6
+    y: 0.9
     z: 1.6
     pitch: 0
-    yaw: 30
+    yaw: 90
   front_tele:
     fov: 30
     x: 1.5
@@ -40,9 +41,28 @@ cameras:
     pitch: 0
     yaw: 0
 
+  rear_left:
+    fov: 70
+    x: -1.5
+    y: -0.7
+    z: 1.6
+    pitch: 0
+    yaw: -135
+  rear_right:
+    fov: 70
+    x: -1.5
+    y: 0.7
+    z: 1.6
+    pitch: 0
+    yaw: 135
+
 alpamayo:
-  model_id: "nvidia/Alpamayo-R1-10B"
-  device: "cpu"
+  variant: "edge"
+  model_id: "nvidia/Alpamayo2-Edge"
+  revision: "f8951d095de3589b3face1dec3f4394c8ecedb38"
+  device: "cuda"
+  dtype: "bfloat16"
+  nav_text: "Follow the current lane."  # Explicit lane-following intent, not map-based routing.
   attn_implementation: "sdpa"
   num_traj_samples: 1
 

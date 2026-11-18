@@ -23,15 +23,15 @@ import logging
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-import cv2
 import matplotlib
 
 matplotlib.use("Agg")  # Non-interactive backend — no display needed.
 import matplotlib.pyplot as plt
-import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+
+from .utils import ego_to_world
 
 logger = logging.getLogger(__name__)
 
@@ -288,13 +288,10 @@ class VideoComposer:
             import math
 
             yaw_rad = math.radians(ego_state.get("yaw", 0))
-            cos_y = math.cos(yaw_rad)
-            sin_y = math.sin(yaw_rad)
             pred_xs = []
             pred_ys = []
             for wp in predicted_traj:
-                wx = ego_x + wp[0] * cos_y - wp[1] * sin_y
-                wy = ego_y + wp[0] * sin_y + wp[1] * cos_y
+                wx, wy = ego_to_world(wp[0], wp[1], ego_x, ego_y, yaw_rad)
                 pred_xs.append(wx)
                 pred_ys.append(wy)
             ax.plot(pred_xs, pred_ys, color="#3c78ff", linewidth=2, alpha=0.9, label="Predicted")

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import random
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
-import carla
+if TYPE_CHECKING:
+    import carla
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,8 @@ class CarlaClient:
         Returns:
             The ``carla.World`` handle.
         """
+        import carla
+
         host = self._cfg_carla["host"]
         port = self._cfg_carla["port"]
         timeout = self._cfg_carla.get("timeout", 30)
@@ -140,6 +143,8 @@ class CarlaClient:
         Raises:
             RuntimeError: If no vehicle has been spawned yet.
         """
+        import carla
+
         if self.vehicle is None:
             raise RuntimeError("Spawn the vehicle before attaching sensors.")
 
